@@ -1,0 +1,6 @@
+id: academic
+name: Academic Review
+categories: [structure, writing, citation]
+weights: {structure: 35, writing: 30, citation: 35}
+permissions: {writing: 3, citation: 1, structure: 2}
+required_sections: [Introduction, References]

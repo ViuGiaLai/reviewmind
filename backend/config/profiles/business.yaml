@@ -1,0 +1,6 @@
+id: business
+name: Business Proposal
+categories: [structure, writing]
+weights: {structure: 40, writing: 60}
+permissions: {writing: 4, structure: 3}
+required_sections: [Executive Summary]
