@@ -3,23 +3,19 @@ from __future__ import annotations
 import csv
 import io
 import json
-import os
-import re
 from dataclasses import asdict
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from app.config import settings
+from app.api.auth import get_current_user_id
 from app.database import create_database
 from app.review import ReviewEngine, ReviewRequest
 from app.review.models import ReviewResult
-from app.review.parser import FileParser, UnsupportedDocumentError
+from app.review.parser import FileParser
 from app.storage import create_storage
 
 router = APIRouter(prefix="/api", tags=["review"])
@@ -29,28 +25,16 @@ file_parser = FileParser()
 database = create_database()
 storage = create_storage()
 
-MAX_FILE_SIZE = settings.app.max_file_size
-ALLOWED_MIME_TYPES: dict[str, str] = {
-    ".txt": "text/plain",
-    ".md": "text/markdown",
-    ".markdown": "text/markdown",
-    ".html": "text/html",
-    ".htm": "text/html",
-    ".tex": "text/x-tex",
-    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ".pdf": "application/pdf",
-}
-ALLOWED_EXTENSIONS = set(ALLOWED_MIME_TYPES.keys())
-
 # ─── Schemas ───────────────────────────────────────────────────────────────────
 
 class ReviewBody(BaseModel):
-    text: str = Field(min_length=1, max_length=2_000_000)
+    text: str = Field(default="", min_length=0, max_length=2_000_000)
     filename: str = "document.md"
     content_type: str = "text/markdown"
     profile_id: str = "academic"
     pack_ids: list[str] = []
     enabled_categories: list[str] | None = None
+    document_id: str | None = None
 
 
 class IssueUpdateBody(BaseModel):
@@ -68,13 +52,17 @@ class ExportQuery(BaseModel):
 
 # ─── Helper ────────────────────────────────────────────────────────────────────
 
-def _safe_filename(original: str) -> str:
-    name, ext = os.path.splitext(original)
-    safe_name = re.sub(r"[^\w\-_]", "_", name)[:64]
-    return f"{safe_name}_{uuid4().hex[:8]}{ext}"
+def _verify_session_owner(session_id: str, user_id: str | None) -> dict[str, Any]:
+    """Verify session exists and belongs to current user. Returns session dict."""
+    session = database.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    if user_id and session.get("user_id") and session["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Session does not belong to this user.")
+    return session
 
 
-async def _run_review(
+def _run_review(
     text: str,
     filename: str,
     content_type: str,
@@ -104,156 +92,77 @@ async def _run_review(
 def list_reviews(
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    user_id: str | None = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    """List all review sessions (GET /api/reviews)."""
-    sessions, total = database.list_sessions(limit=limit, offset=offset)
+    """List review sessions for the current user."""
+    sessions, total = database.list_sessions(limit=limit, offset=offset, user_id=user_id)
     return {"reviews": sessions, "total": total}
 
 
 @router.post("/reviews")
-async def review_text(body: ReviewBody) -> dict[str, Any]:
-    """Review a document from raw text input."""
+def review_text(
+    body: ReviewBody,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    """Review a document — either from raw text or from a previously uploaded document (by document_id)."""
     try:
-        result_dict, result_obj = await _run_review(
-            text=body.text,
-            filename=body.filename,
-            content_type=body.content_type,
+        doc_id = body.document_id
+        filename = body.filename
+        content_type = body.content_type
+
+        # ── Resolve document content ──
+        if doc_id:
+            # Fetch from storage + parse
+            doc_record = database.get_document(doc_id)
+            if not doc_record:
+                raise HTTPException(status_code=404, detail=f"Document with id '{doc_id}' not found.")
+            # Verify document belongs to current user
+            if user_id and doc_record.get("user_id") and doc_record["user_id"] != user_id:
+                raise HTTPException(status_code=403, detail="Document does not belong to this user.")
+            content = storage.read(doc_record["storage_path"])
+            filename = doc_record["original_name"]
+            content_type = doc_record.get("content_type", "application/octet-stream")
+            document = file_parser.parse(content, filename, content_type)
+            text = document.text
+        else:
+            # Use provided text directly
+            if not body.text:
+                raise HTTPException(status_code=400, detail="Provide either 'text' or 'document_id'.")
+            text = body.text
+
+        # ── Run review ──
+        result_dict, result_obj = _run_review(
+            text=text,
+            filename=filename,
+            content_type=content_type,
             profile_id=body.profile_id,
             pack_ids=body.pack_ids,
             enabled_categories=body.enabled_categories,
         )
+
         session_id = database.save_session(
-            filename=body.filename,
+            filename=filename,
             profile_id=body.profile_id,
             pack_ids=body.pack_ids,
             categories=list(result_dict["category_scores"].keys()),
             result=result_obj,
+            document_id=doc_id,
+            user_id=user_id,
         )
         result_dict["session_id"] = session_id
+        result_dict["document_id"] = doc_id
+        result_dict["filename"] = filename
+
+        # Replace issues with DB-stored issues so they have real UUIDs,
+        # not the engine's rule_id-style IDs.
+        db_issues, _ = database.list_issues(session_id=session_id, limit=500)
+        result_dict["issues"] = db_issues
+
         return result_dict
+    except HTTPException:
+        raise
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 2. FILE UPLOAD
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@router.post("/reviews/upload")
-async def upload_review(
-    file: UploadFile = File(...),
-    profile_id: str = Form("academic"),
-    pack_ids: str = Form("[]"),
-    enabled_categories: str | None = Form(None),
-) -> dict[str, Any]:
-    """Upload a document file and run a review."""
-    # Validate
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided.")
-
-    suffix = Path(file.filename).suffix.casefold()
-    if suffix not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type '{suffix}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
-        )
-
-    # Read content
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=413, detail=f"File too large. Maximum size is {MAX_FILE_SIZE // (1024*1024)} MB.")
-    if len(content) == 0:
-        raise HTTPException(status_code=400, detail="Empty file.")
-
-    # Detect MIME
-    content_type = ALLOWED_MIME_TYPES.get(suffix, file.content_type or "application/octet-stream")
-
-    # Save to storage (config-driven: local or S3)
-    storage_path, safe_name = storage.save(content, file.filename)
-
-    # Save document record
-    doc_id = database.save_document(
-        original_name=file.filename,
-        content_type=content_type,
-        size=len(content),
-        storage_path=storage_path,
-    )
-
-    # Parse
-    try:
-        document = file_parser.parse(content, file.filename, content_type)
-    except UnsupportedDocumentError as error:
-        storage.delete(storage_path)
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    except Exception as error:
-        storage.delete(storage_path)
-        raise HTTPException(status_code=422, detail=f"Failed to parse document: {error}") from error
-
-    # Parse pack_ids
-    try:
-        parsed_pack_ids: list[str] = json.loads(pack_ids) if isinstance(pack_ids, str) else pack_ids
-    except (json.JSONDecodeError, TypeError):
-        parsed_pack_ids = []
-
-    # Parse categories
-    parsed_categories: list[str] | None = None
-    if enabled_categories:
-        try:
-            parsed_categories = json.loads(enabled_categories) if isinstance(enabled_categories, str) else enabled_categories
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    # Run review
-    result_dict, result_obj = await _run_review(
-        text=document.text,
-        filename=file.filename,
-        content_type=content_type,
-        profile_id=profile_id,
-        pack_ids=parsed_pack_ids,
-        enabled_categories=parsed_categories,
-    )
-
-    session_id = database.save_session(
-        filename=file.filename,
-        profile_id=profile_id,
-        pack_ids=parsed_pack_ids,
-        categories=list(result_dict["category_scores"].keys()),
-        result=result_obj,
-        document_id=doc_id,
-    )
-
-    # Include rich document structure in response
-    result_dict["session_id"] = session_id
-    result_dict["document_id"] = doc_id
-    result_dict["document_name"] = file.filename
-    result_dict["document_size"] = len(content)
-    result_dict["document_info"] = {
-        "metadata": asdict(document.metadata),
-        "block_count": len(document.blocks),
-        "table_count": len(document.tables),
-        "figure_count": len(document.figures),
-        "footnote_count": len(document.footnotes),
-        "page_count": len(document.pages),
-        "word_count": document.metadata.word_count,
-        "char_count": document.metadata.character_count,
-    }
-    # Include table/figure previews (truncated for response size)
-    if document.tables:
-        result_dict["document_info"]["tables"] = [
-            {"rows": t.rows, "cols": t.cols, "caption": t.caption}
-            for t in document.tables[:10]
-        ]
-    if document.figures:
-        result_dict["document_info"]["figures"] = [
-            {"width": f.width, "height": f.height, "caption": f.caption}
-            for f in document.figures[:10]
-        ]
-    if document.pages:
-        result_dict["document_info"]["pages"] = [
-            {"number": i + 1, "blocks": len(page_blocks)}
-            for i, page_blocks in enumerate(document.pages[:50])
-        ]
-    return result_dict
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -270,8 +179,9 @@ def list_history(
     search: str | None = Query(None),
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    user_id: str | None = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    """List review sessions with filtering and pagination."""
+    """List review sessions with filtering and pagination (scoped to current user)."""
     sessions, total = database.list_sessions(
         profile_id=profile_id,
         document_id=document_id,
@@ -281,6 +191,7 @@ def list_history(
         search=search,
         limit=limit,
         offset=offset,
+        user_id=user_id,
     )
     return {
         "items": sessions,
@@ -291,11 +202,17 @@ def list_history(
 
 
 @router.get("/history/{session_id}")
-def get_session_detail(session_id: str) -> dict[str, Any]:
+def get_session_detail(
+    session_id: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Get full detail of a review session including issues."""
     session = database.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
+    # Verify session belongs to current user
+    if user_id and session.get("user_id") and session["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Session does not belong to this user.")
 
     issues, issue_count = database.list_issues(session_id=session_id, limit=500)
     session["issues"] = issues
@@ -310,8 +227,17 @@ def get_session_detail(session_id: str) -> dict[str, Any]:
 
 
 @router.delete("/history/{session_id}")
-def delete_session(session_id: str) -> dict[str, str]:
+def delete_session(
+    session_id: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, str]:
     """Delete a review session and its issues."""
+    session = database.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    # Verify session belongs to current user
+    if user_id and session.get("user_id") and session["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Session does not belong to this user.")
     if not database.delete_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
     return {"status": "deleted"}
@@ -331,12 +257,11 @@ def list_session_issues(
     search: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    user_id: str | None = Depends(get_current_user_id),
 ) -> dict[str, Any]:
     """List issues for a session with filtering and pagination."""
-    # Verify session exists
-    session = database.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+    # Verify session exists + ownership
+    session = _verify_session_owner(session_id, user_id)
 
     issues, total = database.list_issues(
         session_id=session_id,
@@ -358,11 +283,12 @@ def list_session_issues(
 
 
 @router.get("/sessions/{session_id}/issues/stats")
-def get_issue_stats(session_id: str) -> dict[str, Any]:
+def get_issue_stats(
+    session_id: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Get aggregated statistics for issues in a session."""
-    session = database.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+    session = _verify_session_owner(session_id, user_id)
 
     issues, total = database.list_issues(session_id=session_id, limit=500)
 
@@ -387,8 +313,13 @@ def get_issue_stats(session_id: str) -> dict[str, Any]:
 
 
 @router.get("/sessions/{session_id}/issues/{issue_id}")
-def get_issue_detail(session_id: str, issue_id: str) -> dict[str, Any]:
+def get_issue_detail(
+    session_id: str,
+    issue_id: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Get full detail of a single issue, including history across scans."""
+    _verify_session_owner(session_id, user_id)
     issue = database.get_issue(issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found.")
@@ -401,8 +332,14 @@ def get_issue_detail(session_id: str, issue_id: str) -> dict[str, Any]:
 
 
 @router.patch("/sessions/{session_id}/issues/{issue_id}")
-def update_issue_status(session_id: str, issue_id: str, body: IssueUpdateBody) -> dict[str, Any]:
+def update_issue_status(
+    session_id: str,
+    issue_id: str,
+    body: IssueUpdateBody,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Update the status of an issue (open/resolved/ignored)."""
+    _verify_session_owner(session_id, user_id)
     issue = database.get_issue(issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found.")
@@ -412,8 +349,13 @@ def update_issue_status(session_id: str, issue_id: str, body: IssueUpdateBody) -
 
 
 @router.post("/sessions/{session_id}/issues/bulk")
-def bulk_update_issues(session_id: str, body: BulkIssueUpdateBody) -> dict[str, Any]:
+def bulk_update_issues(
+    session_id: str,
+    body: BulkIssueUpdateBody,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Bulk update issue status for a session."""
+    _verify_session_owner(session_id, user_id)
     count = database.bulk_update_issue_status(session_id, body.status, body.category)
     return {"updated": count, "status": body.status, "category": body.category}
 
@@ -423,11 +365,13 @@ def bulk_update_issues(session_id: str, body: BulkIssueUpdateBody) -> dict[str, 
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/sessions/{session_id}/export")
-def export_session(session_id: str, format: str = Query("json", pattern=r"^(json|md|markdown|html|pdf|docx|csv)$")):
+def export_session(
+    session_id: str,
+    format: str = Query("json", pattern=r"^(json|md|markdown|html|pdf|docx|csv)$"),
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Export a review session in the requested format."""
-    session = database.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+    session = _verify_session_owner(session_id, user_id)
 
     issues, _ = database.list_issues(session_id=session_id, limit=500)
 

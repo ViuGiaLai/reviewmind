@@ -626,6 +626,108 @@ small { font-size: .82em; }
 .review-main { flex: 1; min-width: 0; }
 .section-title { font-size: .8rem; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
 
+/* ═══════════════════════════════════════════════════════════════════════════════
+   WIZARD - Step 1 Source Options
+   ═══════════════════════════════════════════════════════════════════════════════ */
+.wizard-source-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.source-option-card {
+  padding: 28px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--transition);
+  border: 2px dashed var(--border2);
+  border-radius: var(--radius);
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.source-option-card:hover {
+  border-color: var(--primary);
+  background: var(--primary-glow-soft);
+  box-shadow: var(--shadow);
+  transform: translateY(-2px);
+}
+.source-option-card strong {
+  font-size: 1rem;
+  color: var(--text);
+}
+.source-option-card p {
+  font-size: .8rem;
+  color: var(--text2);
+  margin: 0;
+}
+.soc-icon {
+  color: var(--primary);
+  opacity: .7;
+}
+.soc-action {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--primary);
+  margin-top: 4px;
+}
+
+/* Existing Documents List */
+.existing-docs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.existing-doc-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition);
+  border: 1.5px solid transparent;
+  background: var(--surface3);
+  font-size: .8rem;
+}
+.existing-doc-item:hover {
+  border-color: var(--border2);
+  background: var(--surface4);
+}
+.existing-doc-item.selected {
+  border-color: var(--primary);
+  background: var(--primary-glow-soft);
+}
+.edoc-date {
+  font-size: .72rem;
+  color: var(--text3);
+  margin-left: auto;
+}
+.edoc-check {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+/* Wizard Upload Progress */
+.wizard-upload-progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px;
+  color: var(--text2);
+  font-size: .85rem;
+}
+.wizard-upload-progress .spin {
+  animation: spin .8s linear infinite;
+}
+
 /* ── Drop Zone ─────────────────────────────────────────────────────────────── */
 .drop-zone {
   border: 2px dashed var(--border2);

@@ -40,6 +40,7 @@ class DatabaseBackend(ABC):
         self,
         search: str | None = None,
         content_type: str | None = None,
+        user_id: str | None = None,
         limit: int = 30,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]: ...
@@ -73,6 +74,7 @@ class DatabaseBackend(ABC):
         score_min: int | None = None,
         score_max: int | None = None,
         search: str | None = None,
+        user_id: str | None = None,
         limit: int = 30,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]: ...
@@ -119,6 +121,7 @@ class DatabaseBackend(ABC):
         category: str | None = None,
         status: str | None = None,
         search: str | None = None,
+        user_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]: ...
@@ -129,10 +132,10 @@ class DatabaseBackend(ABC):
     # ── Aggregation / Dashboard ──────────────────────────────────────────
 
     @abstractmethod
-    def get_dashboard_stats(self) -> dict[str, Any]: ...
+    def get_dashboard_stats(self, user_id: str | None = None) -> dict[str, Any]: ...
 
     @abstractmethod
-    def get_statistics(self) -> dict[str, Any]: ...
+    def get_statistics(self, user_id: str | None = None) -> dict[str, Any]: ...
 
     # ── History Compare ──────────────────────────────────────────────────
 
@@ -146,6 +149,7 @@ class DatabaseBackend(ABC):
         self,
         query: str,
         limit: int = 20,
+        user_id: str | None = None,
     ) -> dict[str, list[dict[str, Any]]]: ...
 
     # ── Packs ────────────────────────────────────────────────────────────

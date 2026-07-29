@@ -5,7 +5,7 @@ import { FileText, Settings, Bot, Zap, ScrollText, MapPin, Ruler, Check, Slash, 
 
 const API_URL = (import.meta as any).env?.VITE_API_URL ?? "http://localhost:8000";
 
-export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJumpToDoc, issues, issueIndex, onNavigate }: {
+export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJumpToDoc, issues, issueIndex, onNavigate, apiFetch }: {
   issue: Issue | null;
   session: SessionDetail;
   onClose: () => void;
@@ -14,6 +14,7 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
   issues?: Issue[];
   issueIndex?: number;
   onNavigate?: (index: number) => void;
+  apiFetch: (url: string, options?: RequestInit) => Promise<Response>;
 }) {
   const [activeSection, setActiveSection] = useState<"evidence" | "rule" | "ai" | "autofix" | "history">("evidence");
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
@@ -40,18 +41,9 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
   async function loadAiExplanation() {
     setAiLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/ai/explain`, {
-        method: "POST",
+      const response = await apiFetch(`${API_URL}/api/issues/${iss.id}/explain`, {
+        method: "GET",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rule_id: iss.rule_id,
-          category: iss.category,
-          message: iss.message,
-          confidence: iss.confidence,
-          recommendation: iss.recommendation,
-          evidence_excerpt: iss.evidence_excerpt,
-          session_id: session.id,
-        }),
       });
       if (response.ok) {
         const data = await response.json();
@@ -75,22 +67,24 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
   async function loadAutoFix() {
     setFixLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/ai/autofix`, {
-        method: "POST",
+      // Fetch suggestions from the autofix engine
+      const response = await apiFetch(`${API_URL}/api/sessions/${session.id}/autofix/suggestions`, {
+        method: "GET",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rule_id: iss.rule_id,
-          evidence_excerpt: iss.evidence_excerpt,
-          recommendation: iss.recommendation,
-          session_id: session.id,
-        }),
       });
       if (response.ok) {
         const data = await response.json();
-        setAutoFixSuggestion({
-          original: iss.evidence_excerpt || "Original text",
-          suggested: data.suggested || data.fix || "[Fixed] " + (iss.evidence_excerpt || "Suggested text"),
-        });
+        const items = data.items || [];
+        // Find suggestion matching this issue
+        const match = items.find((s: any) => s.issue_id === iss.id || s.rule_id === iss.rule_id);
+        if (match) {
+          setAutoFixSuggestion({
+            original: match.original_text || iss.evidence_excerpt || "Original text",
+            suggested: match.suggested_text || "[Fixed] " + (iss.evidence_excerpt || "Suggested text"),
+          });
+        } else {
+          throw new Error("No matching suggestion");
+        }
       } else {
         throw new Error("API error");
       }
@@ -107,15 +101,19 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
   async function handleApplyFix() {
     setFixApplied(true);
     try {
-      await fetch(`${API_URL}/api/ai/apply-fix`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          issue_id: iss.id,
-          session_id: session.id,
-          fixed_text: autoFixSuggestion?.suggested,
-        }),
-      });
+      // First get suggestions to find the suggestion ID
+      const suggestionsResp = await apiFetch(`${API_URL}/api/sessions/${session.id}/autofix/suggestions`);
+      if (suggestionsResp.ok) {
+        const suggestionsData = await suggestionsResp.json();
+        const match = (suggestionsData.items || []).find((s: any) =>
+          s.issue_id === iss.id || s.rule_id === iss.rule_id
+        );
+        if (match) {
+          await apiFetch(`${API_URL}/api/sessions/${session.id}/autofix/apply/${match.id}`, {
+            method: "POST",
+          });
+        }
+      }
     } catch { }
   }
 

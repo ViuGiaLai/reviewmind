@@ -117,6 +117,90 @@ async def verify_clerk_session(request: Request) -> dict[str, Any]:
         )
 
 
+# ── Sync dependency for endpoints that need user_id ────────────────────────
+
+
+def get_current_user_id(request: Request) -> str | None:
+    """
+    Extract the current user's Clerk ID from the Authorization header.
+
+    In development mode (no CLERK_SECRET_KEY set), returns 'dev-user'.
+    In production, parses the Clerk JWT session token.
+
+    Usage: add `user_id: str | None = Depends(get_current_user_id)` to any route.
+    """
+    if not settings.llm.clerk_secret_key:
+        # Development mode — no auth required
+        return "dev-user"
+
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+
+    try:
+        token = auth_header.replace("Bearer ", "")
+        # Simple JWT decode — extract the payload without full verification
+        # (full verification uses JWKS; see verify_clerk_session above)
+        import base64
+        import json
+
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+
+        # Decode the payload (second part of JWT)
+        payload_b64 = parts[1]
+        # Add padding
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        payload_bytes = base64.urlsafe_b64decode(payload_b64)
+        payload = json.loads(payload_bytes)
+
+        return payload.get("sub")
+    except Exception:
+        return None
+
+
+# ── Sync User on Login (frontend calls this) ──────────────────────────────
+
+
+from pydantic import BaseModel
+
+
+class SyncUserBody(BaseModel):
+    name: str = ""
+    email: str = ""
+    avatar_url: str = ""
+
+
+@router.post("/sync")
+def sync_user(
+    body: SyncUserBody,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    """
+    Sync the authenticated user's profile to the local database.
+    Called by the frontend whenever a user logs in or their profile changes.
+    """
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+
+    database.upsert_user(
+        id=user_id,
+        email=body.email,
+        name=body.name or "Unknown User",
+        avatar_url=body.avatar_url,
+    )
+    logger.info(f"User synced: {user_id} — {body.email}")
+
+    return {
+        "synced": True,
+        "user_id": user_id,
+    }
+
+
 # ── User Info Endpoint ───────────────────────────────────────────────────────
 
 

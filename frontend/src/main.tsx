@@ -15,7 +15,16 @@ import { QualityInsights } from "./components/QualityInsights";
 import { IssueInspector } from "./components/IssueInspector";
 import { ReviewTimeline } from "./components/ReviewTimeline";
 import { RuleDistributionChart } from "./components/RuleDistributionChart";
+import { AutoFixPlanner } from "./components/AutoFixPlanner";
 import "./styles.css";
+
+/* ── Safe localStorage helpers (handles Safari private mode, storage full) ── */
+function safeGetItem(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function safeSetItem(key: string, value: string): void {
+  try { localStorage.setItem(key, value); } catch { /* Silently fail */ }
+}
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? "";
@@ -125,7 +134,7 @@ function breadcrumb(page: Page, docName?: string): { label: string; page?: Page 
 
 function App() {
   const [page, setPage] = useState<Page>("home");
-  const [theme, setTheme] = useState<"light" | "dark">(() => (localStorage.getItem("theme") as "light" | "dark") || "light");
+  const [theme, setTheme] = useState<"light" | "dark">(() => (safeGetItem("theme") as "light" | "dark") || "light");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [text, setText] = useState("# Review Document\n\nThis is a sample document for review. The engine will analyze this text for quality, consistency, and compliance issues based on the selected profile.");
@@ -143,6 +152,7 @@ function App() {
   const [showPackForm, setShowPackForm] = useState(false);
   const [docViewMode, setDocViewMode] = useState<"raw" | "formatted">("raw");
   const [isUploadingDocument, setIsUploadingDocument] = useState(false);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -160,9 +170,24 @@ function App() {
     return fetch(url, { ...options, headers });
   };
 
+  // Sync user to backend when login state changes
+  useEffect(() => {
+    if (user && isSignedIn) {
+      apiFetch(`${API_URL}/api/auth/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: user.fullName || user.username || "Reviewer",
+          email: user.primaryEmailAddress?.emailAddress || "",
+          avatar_url: user.imageUrl || "",
+        }),
+      }).catch(() => {});
+    }
+  }, [user, isSignedIn]);
+
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("theme", theme);
+    safeSetItem("theme", theme);
   }, [theme]);
 
   useEffect(() => {
@@ -201,7 +226,7 @@ function App() {
   }
 
   function handleLoginSuccess(user: { name: string; email: string; role: string }) {
-    localStorage.setItem("reviewmind_user", JSON.stringify(user));
+    safeSetItem("reviewmind_user", JSON.stringify(user));
     setNotifications(prev => [...prev, { id: crypto.randomUUID(), text: `Welcome back, ${user.name}!`, time: new Date().toLocaleTimeString(), read: false }]);
     if (page === "landing") setPage("home");
   }
@@ -242,6 +267,7 @@ function App() {
     review_mode?: string;
     text?: string;
     binaryFile?: File | null;
+    document_id?: string | null;
   }) {
     setLoading(true);
     const profId = options?.profile_id || profile;
@@ -251,33 +277,33 @@ function App() {
     const revBinaryFile = options?.binaryFile || null;
 
     try {
-      let response: Response;
-      if (revBinaryFile) {
-        // Binary file → use upload API
-        const formData = new FormData();
-        formData.append("file", revBinaryFile);
-        formData.append("profile_id", profId);
-        formData.append("pack_ids", JSON.stringify(packIds));
-        if (enabledCats.length > 0) {
-          formData.append("enabled_categories", JSON.stringify(enabledCats));
-        }
-        response = await apiFetch(`${API_URL}/api/reviews/upload`, {
-          method: "POST",
-          body: formData,
-        });
-      } else {
-        // Text → use JSON review API
-        response = await apiFetch(`${API_URL}/api/reviews`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: reviewText,
-            profile_id: profId,
-            pack_ids: packIds,
-            enabled_categories: enabledCats.length > 0 ? enabledCats : undefined,
-          }),
-        });
+      // Build request body
+      const body: Record<string, any> = {
+        profile_id: profId,
+        pack_ids: packIds,
+      };
+      if (enabledCats.length > 0) {
+        body.enabled_categories = enabledCats;
       }
+
+      const docId = options?.document_id || selectedDocumentId;
+      if (docId) {
+        body.document_id = docId;
+      } else if (reviewText) {
+        body.text = reviewText;
+        body.filename = "document.md";
+        body.content_type = "text/markdown";
+      } else {
+        alert("No document selected and no text provided.");
+        setLoading(false);
+        return;
+      }
+
+      const response = await apiFetch(`${API_URL}/api/reviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       if (!response.ok) throw new Error(await response.text());
       const data = await response.json();
       const session: SessionDetail = {
@@ -395,7 +421,7 @@ function App() {
     const found = reviewList.find(r => r.id === id);
     if (!found) return;
     try {
-      const response = await apiFetch(`${API_URL}/api/reviews/${id}`);
+      const response = await apiFetch(`${API_URL}/api/history/${id}`);
       if (response.ok) {
         const data = await response.json();
         const session: SessionDetail = {
@@ -464,23 +490,26 @@ function App() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const response = await apiFetch(`${API_URL}/api/reviews/upload`, {
+      const response = await apiFetch(`${API_URL}/api/documents/upload`, {
         method: "POST",
         body: formData,
       });
       if (response.ok) {
         const data = await response.json();
-        setDocuments(prev => [
-          { id: data.document_id || crypto.randomUUID(), name: file.name, uploaded_at: new Date().toISOString() },
-          ...prev,
-        ]);
-        setNotifications(prev => [...prev, { id: crypto.randomUUID(), text: `Document "${file.name}" uploaded successfully`, time: new Date().toLocaleString(), read: false }]);
+        if (data.document_id) {
+          setDocuments(prev => [
+            { id: data.document_id, name: file.name, uploaded_at: new Date().toISOString() },
+            ...prev,
+          ]);
+          setNotifications(prev => [...prev, { id: crypto.randomUUID(), text: `Document "${file.name}" uploaded successfully`, time: new Date().toLocaleString(), read: false }]);
+        }
       } else {
-        setDocuments(prev => [...prev, { id: crypto.randomUUID(), name: file.name, uploaded_at: new Date().toISOString() }]);
-        setNotifications(prev => [...prev, { id: crypto.randomUUID(), text: `Document "${file.name}" uploaded`, time: new Date().toLocaleString(), read: false }]);
+        const errText = await response.text().catch(() => "Upload failed");
+        setNotifications(prev => [...prev, { id: crypto.randomUUID(), text: `Upload failed: ${errText.slice(0, 200)}`, time: new Date().toLocaleString(), read: false }]);
       }
-    } catch {
-      setDocuments(prev => [...prev, { id: crypto.randomUUID(), name: file.name, uploaded_at: new Date().toISOString() }]);
+    } catch (error) {
+      console.error("Upload failed:", error);
+      setNotifications(prev => [...prev, { id: crypto.randomUUID(), text: `Upload failed: Network error`, time: new Date().toLocaleString(), read: false }]);
     } finally {
       setIsUploadingDocument(false);
     }
@@ -673,7 +702,7 @@ function App() {
         <div className="workspace-main">
           <div className="workspace-content">
             {page === "home" && result ? (
-              <DashboardView session={result} onSelectIssue={setSelectedIssue} selectedIssue={selectedIssue} onUpdateStatus={handleUpdateStatus} onSelectSession={handleSelectSession} reviewList={reviewList} onNavigatePage={setPage} />
+              <DashboardView session={result} onSelectIssue={setSelectedIssue} selectedIssue={selectedIssue} onUpdateStatus={handleUpdateStatus} onSelectSession={handleSelectSession} reviewList={reviewList} onNavigatePage={setPage} apiFetch={apiFetch} />
             ) : page === "home" && !result ? (
               <HomeWelcomeDashboard userName={currentUser.name} onNavigate={setPage} />
             ) : page === "reviews" ? (
@@ -684,9 +713,14 @@ function App() {
                 setProfile={setProfile}
                 loading={loading}
                 onSubmit={submitReview}
+                documents={documents}
+                selectedDocumentId={selectedDocumentId}
+                setSelectedDocumentId={setSelectedDocumentId}
+                apiFetch={apiFetch}
+                API_URL={API_URL}
               />
             ) : page === "review-detail" && result ? (
-              <DashboardView session={result} onSelectIssue={setSelectedIssue} selectedIssue={selectedIssue} onUpdateStatus={handleUpdateStatus} onSelectSession={handleSelectSession} reviewList={reviewList} onNavigatePage={setPage} />
+              <DashboardView session={result} onSelectIssue={setSelectedIssue} selectedIssue={selectedIssue} onUpdateStatus={handleUpdateStatus} onSelectSession={handleSelectSession} reviewList={reviewList} onNavigatePage={setPage} apiFetch={apiFetch} />
             ) : page === "history" ? (
               <HistoryView items={reviewList} onSelect={handleSelectReview} />
             ) : page === "documents" ? (
@@ -780,7 +814,7 @@ function HomeWelcomeDashboard({ userName, onNavigate }: { userName: string; onNa
 }
 
 /* Enhanced Dashboard View */
-function DashboardView({ session, onSelectIssue, selectedIssue, onUpdateStatus, onSelectSession, reviewList, onNavigatePage }: {
+function DashboardView({ session, onSelectIssue, selectedIssue, onUpdateStatus, onSelectSession, reviewList, onNavigatePage, apiFetch }: {
   session: SessionDetail;
   onSelectIssue: (issue: Issue | null) => void;
   selectedIssue: Issue | null;
@@ -788,8 +822,10 @@ function DashboardView({ session, onSelectIssue, selectedIssue, onUpdateStatus, 
   onSelectSession: (id: string) => void;
   reviewList: HistoryItem[];
   onNavigatePage?: (page: Page) => void;
+  apiFetch: (url: string, options?: RequestInit) => Promise<Response>;
 }) {
   const [showRerunMenu, setShowRerunMenu] = useState(false);
+  const [showAutoFix, setShowAutoFix] = useState(false);
   const rerunRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -925,9 +961,9 @@ function DashboardView({ session, onSelectIssue, selectedIssue, onUpdateStatus, 
             </div>
             <div className="pipe-step-label">{pipeline.ai_scheduler?.label || "Skipped (Rules Satisfied)"}</div>
           </div>
-          <div className="pipe-step-card ready">
+          <div className="pipe-step-card ready" style={{ cursor: 'pointer' }} onClick={() => setShowAutoFix(true)}>
             <div className="pipe-step-head"><Wrench size={16} className="pipe-icon ready" /><strong>6. Auto Fix Engine</strong></div>
-            <div className="pipe-step-label">{pipeline.autofix?.label || "Ready"}</div>
+            <div className="pipe-step-label">{pipeline.autofix?.label || "Ready (Click to Open)"}</div>
           </div>
         </div>
       </div>
@@ -1009,9 +1045,23 @@ function DashboardView({ session, onSelectIssue, selectedIssue, onUpdateStatus, 
         return (
           <IssueInspector issue={selectedIssue} session={session} onClose={() => onSelectIssue(null)}
             onUpdateStatus={(id, status) => { onUpdateStatus(id, status); onSelectIssue(null); }}
-            issues={session.issues} issueIndex={idx >= 0 ? idx : 0} onNavigate={(i) => onSelectIssue(session.issues[i])} />
+            issues={session.issues} issueIndex={idx >= 0 ? idx : 0} onNavigate={(i) => onSelectIssue(session.issues[i])} apiFetch={apiFetch} />
         );
       })()}
+
+      {showAutoFix && (
+        <AutoFixPlanner
+          session={session}
+          issues={session.issues}
+          apiFetch={apiFetch}
+          API_URL={API_URL}
+          onClose={() => setShowAutoFix(false)}
+          onApplied={() => {
+            // Can reload session here if needed
+            onSelectSession(session.id);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1024,35 +1074,47 @@ function ReviewWizardView({
   setProfile,
   loading,
   onSubmit,
+  documents,
+  selectedDocumentId,
+  setSelectedDocumentId,
+  apiFetch,
+  API_URL,
 }: {
   profile: string;
   setProfile: (v: string) => void;
   loading: boolean;
   onSubmit: (options?: any) => void;
+  documents: DocumentItem[];
+  selectedDocumentId: string | null;
+  setSelectedDocumentId: (id: string | null) => void;
+  apiFetch: (url: string, options?: RequestInit) => Promise<Response>;
+  API_URL: string;
 }) {
-  const [step, setStep] = useState<number>(() => Number(localStorage.getItem("rw_step")) || 1);
+  const [step, setStep] = useState<number>(() => Number(safeGetItem("rw_step")) || 1);
   const [selectedPacks, setSelectedPacks] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem("rw_packs") || '["academic_base"]'); } catch { return ["academic_base"]; }
   });
   const [selectedCategories, setSelectedCategories] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem("rw_categories") || '["structure", "writing", "citation", "logic", "compliance", "figures", "tables"]'); } catch { return ["structure", "writing", "citation", "logic", "compliance", "figures", "tables"]; }
   });
-  const [reviewMode, setReviewMode] = useState<"rule_only" | "rule_ai" | "full">(() => (localStorage.getItem("rw_mode") as any) || "rule_ai");
-  const [language, setLanguage] = useState<"en" | "vi">(() => (localStorage.getItem("rw_lang") as any) || "en");
-  const [text, setText] = useState(() => localStorage.getItem("rw_text") || "");
+  const [reviewMode, setReviewMode] = useState<"rule_only" | "rule_ai" | "full">(() => (safeGetItem("rw_mode") as any) || "rule_ai");
+  const [language, setLanguage] = useState<"en" | "vi">(() => (safeGetItem("rw_lang") as any) || "en");
+  const [text, setText] = useState(() => safeGetItem("rw_text") || "");
   const [binaryFile, setBinaryFile] = useState<File | null>(null);
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const [uploadMode, setUploadMode] = useState<"upload" | "select" | null>(null);
 
   useEffect(() => {
-    localStorage.setItem("rw_step", step.toString());
-    localStorage.setItem("rw_packs", JSON.stringify(selectedPacks));
-    localStorage.setItem("rw_categories", JSON.stringify(selectedCategories));
-    localStorage.setItem("rw_mode", reviewMode);
-    localStorage.setItem("rw_lang", language);
-    localStorage.setItem("rw_text", text);
+    safeSetItem("rw_step", step.toString());
+    safeSetItem("rw_packs", JSON.stringify(selectedPacks));
+    safeSetItem("rw_categories", JSON.stringify(selectedCategories));
+    safeSetItem("rw_mode", reviewMode);
+    safeSetItem("rw_lang", language);
+    safeSetItem("rw_text", text);
   }, [step, selectedPacks, selectedCategories, reviewMode, language, text]);
 
   const [showPreview, setShowPreview] = useState<boolean>(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const wizardUploadRef = useRef<HTMLInputElement>(null);
 
   // Auto-detect profile from document content
   const detectedProfileInfo = useMemo(() => {
@@ -1109,10 +1171,47 @@ function ReviewWizardView({
     setText("");
   }
 
+  async function handleWizardUpload(file: File) {
+    setIsUploadingDoc(true);
+    setUploadMode("upload");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await apiFetch(`${API_URL}/api/documents/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setSelectedDocumentId(data.document_id);
+        setBinaryFile(file);
+        setText("");
+      }
+    } catch (error) {
+      console.error("Upload failed", error);
+    } finally {
+      setIsUploadingDoc(false);
+    }
+  }
+
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
-    if (f) handleFileUpload(f);
+    if (f) handleWizardUpload(f);
     e.target.value = "";
+  }
+
+  function handleSelectDocument(id: string) {
+    setSelectedDocumentId(id);
+    setUploadMode("select");
+    setBinaryFile(null);
+    setText("");
+  }
+
+  function handleClearSelection() {
+    setSelectedDocumentId(null);
+    setUploadMode(null);
+    setBinaryFile(null);
+    setText("");
   }
 
   function handleStartReview() {
@@ -1122,7 +1221,7 @@ function ReviewWizardView({
       enabled_categories: selectedCategories,
       review_mode: reviewMode,
       text: text,
-      binaryFile: binaryFile,
+      document_id: selectedDocumentId,
     });
   }
 
@@ -1151,65 +1250,98 @@ function ReviewWizardView({
       {/* ── STEP 1: Upload Document (Item 1, 2) ─────────────────────────────── */}
       {step === 1 && (
         <div className="wizard-card card">
-          <h3><Upload size={20} /> Step 1: Upload Document</h3>
-          <p className="wizard-sub">Upload your document (DOCX, PDF, Markdown, TXT, HTML, TeX) or paste document content directly.</p>
+          <h3><Upload size={20} /> Step 1: Select Document</h3>
+          <p className="wizard-sub">Choose how you want to provide the document for review.</p>
 
-          {!binaryFile && !text ? (
-            <div className="drop-zone large" onClick={() => fileRef.current?.click()}>
-              <Upload size={40} className="drop-zone-icon" />
-              <h4>Drag & drop document here or click to browse</h4>
-              <small>Supports DOCX, PDF, Markdown, TXT, HTML, LaTeX (Up to 50MB)</small>
-              <input ref={fileRef} type="file" accept=".docx,.pdf,.txt,.md,.markdown,.html,.tex" style={{ display: "none" }} onChange={handleFileSelect} />
+          {/* ── Option Cards: Upload New or Select Existing ── */}
+          {!selectedDocumentId && !binaryFile && !text && (
+            <div className="wizard-source-options">
+              <div className="card source-option-card" onClick={() => wizardUploadRef.current?.click()}>
+                <Upload size={36} className="soc-icon" />
+                <strong>Upload New File</strong>
+                <p>Upload a DOCX, PDF, or Markdown file. It will be stored and a review can be run later.</p>
+                <span className="soc-action">Choose File ➔</span>
+                <input ref={wizardUploadRef} type="file" accept=".docx,.pdf,.txt,.md,.markdown,.html,.tex" style={{ display: "none" }} onChange={handleFileSelect} />
+              </div>
+              {documents.length > 0 && (
+                <div className="card source-option-card">
+                  <FolderOpen size={36} className="soc-icon" />
+                  <strong>Select Existing Document</strong>
+                  <p>Pick a document from your previously uploaded document vault.</p>
+                  <div className="existing-docs-list">
+                    {documents.map(doc => (
+                      <div key={doc.id} className={`existing-doc-item ${selectedDocumentId === doc.id ? "selected" : ""}`} onClick={() => handleSelectDocument(doc.id)}>
+                        <FileText size={16} />
+                        <span>{doc.name}</span>
+                        <span className="edoc-date">{new Date(doc.uploaded_at).toLocaleDateString()}</span>
+                        {selectedDocumentId === doc.id && <CheckCircle size={14} className="edoc-check" />}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-          ) : (
+          )}
+
+          {/* ── Show Selected Document ── */}
+          {(selectedDocumentId || binaryFile) && (
             <div className="uploaded-file-card">
               <div className="ufc-left">
                 <FileText size={32} className="ufc-icon" />
                 <div className="ufc-meta">
-                  <strong>{binaryFile ? binaryFile.name : "Pasted Document"}</strong>
-                  <div className="ufc-tags">
-                    <span className="format-tag">{binaryFile ? binaryFile.name.split('.').pop()?.toUpperCase() : "MD/TXT"}</span>
-                    <span className="size-tag">{binaryFile ? `${(binaryFile.size / 1024).toFixed(1)} KB` : `${text.length} chars`}</span>
-                    <span className="status-tag ready"><CheckCircle size={12} /> Uploaded</span>
-                  </div>
+                  {uploadMode === "upload" && binaryFile ? (
+                    <>
+                      <strong>{binaryFile.name}</strong>
+                      <div className="ufc-tags">
+                        <span className="format-tag">{binaryFile.name.split('.').pop()?.toUpperCase()}</span>
+                        <span className="size-tag">{(binaryFile.size / 1024).toFixed(1)} KB</span>
+                        <span className="status-tag ready"><CheckCircle size={12} /> Uploaded & Ready</span>
+                      </div>
+                    </>
+                  ) : (
+                    (() => {
+                      const doc = documents.find(d => d.id === selectedDocumentId);
+                      return (
+                        <>
+                          <strong>{doc ? doc.name : "Selected Document"}</strong>
+                          <div className="ufc-tags">
+                            <span className="format-tag">DOC</span>
+                            {doc && <span className="size-tag">{new Date(doc.uploaded_at).toLocaleDateString()}</span>}
+                            <span className="status-tag ready"><CheckCircle size={12} /> Selected</span>
+                          </div>
+                        </>
+                      );
+                    })()
+                  )}
                 </div>
               </div>
               <div className="ufc-actions">
-                <button className="btn-secondary" onClick={() => setShowPreview(!showPreview)}>
-                  <Eye size={14} /> {showPreview ? "Hide Preview" : "Preview"}
+                <button className="btn-danger-outline" onClick={handleClearSelection}>
+                  <Trash2 size={14} /> Clear
                 </button>
-                <button className="btn-secondary" onClick={() => fileRef.current?.click()}>
-                  <RefreshCw size={14} /> Replace
-                </button>
-                <button className="btn-danger-outline" onClick={() => { setBinaryFile(null); setText(""); }}>
-                  <Trash2 size={14} /> Remove
-                </button>
-                <input ref={fileRef} type="file" accept=".docx,.pdf,.txt,.md,.markdown,.html,.tex" style={{ display: "none" }} onChange={handleFileSelect} />
               </div>
             </div>
           )}
 
-          {/* Preview Box */}
-          {showPreview && (
-            <div className="doc-preview-box">
-              <div className="dpb-header">
-                <strong><Eye size={14} /> Document Content Preview</strong>
-                <small>{text.length} characters</small>
-              </div>
-              <textarea value={text} onChange={e => setText(e.target.value)} rows={10} className="dpb-textarea" />
+          {/* Progress / Loading */}
+          {isUploadingDoc && (
+            <div className="wizard-upload-progress">
+              <Loader2 size={20} className="spin" />
+              <span>Uploading document...</span>
             </div>
           )}
 
-          {/* Quick Stats Bar */}
-          <div className="quick-stats-bar">
-            <div className="qs-item"><span className="qs-lbl">Words</span><strong>{text.split(/\s+/).filter(Boolean).length}</strong></div>
-            <div className="qs-item"><span className="qs-lbl">Paragraphs</span><strong>{text.split("\n\n").filter(Boolean).length}</strong></div>
-            <div className="qs-item"><span className="qs-lbl">Characters</span><strong>{text.length}</strong></div>
-            <div className="qs-item"><span className="qs-lbl">Parser</span><strong>Unified Document Model</strong></div>
-          </div>
+          {/* Quick Stats (when pasted text) */}
+          {text && (
+            <div className="quick-stats-bar">
+              <div className="qs-item"><span className="qs-lbl">Words</span><strong>{text.split(/\s+/).filter(Boolean).length}</strong></div>
+              <div className="qs-item"><span className="qs-lbl">Paragraphs</span><strong>{text.split("\n\n").filter(Boolean).length}</strong></div>
+              <div className="qs-item"><span className="qs-lbl">Characters</span><strong>{text.length}</strong></div>
+            </div>
+          )}
 
           <div className="wizard-nav-actions">
-            <button className="btn-primary" onClick={() => setStep(2)}>
+            <button className="btn-primary" disabled={!selectedDocumentId && !binaryFile && !text} onClick={() => setStep(2)}>
               Next: Select Profile <ArrowRight size={16} />
             </button>
           </div>
@@ -1861,7 +1993,7 @@ function SettingsView({ theme, setTheme }: { theme: string; setTheme: (t: "light
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 function LandingPage() {
-  const [theme] = useState(() => (localStorage.getItem("theme") as "light" | "dark") || "light");
+  const [theme] = useState(() => (safeGetItem("theme") as "light" | "dark") || "light");
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
@@ -2071,7 +2203,7 @@ const root = document.getElementById("root");
 if (!root) throw new Error("Root element not found");
 
 function RootApp() {
-  const isDark = typeof window !== "undefined" && (localStorage.getItem("theme") === "dark" || (!localStorage.getItem("theme") && window.matchMedia("(prefers-color-scheme: dark)").matches));
+  const isDark = typeof window !== "undefined" && (safeGetItem("theme") === "dark" || (!safeGetItem("theme") && window.matchMedia("(prefers-color-scheme: dark)").matches));
 
   return (
     <ClerkProvider 

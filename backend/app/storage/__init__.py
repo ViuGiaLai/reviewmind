@@ -158,5 +158,11 @@ class S3Storage(StorageBackend):
 
 
 def create_storage() -> StorageBackend:
-    """Factory: create the appropriate storage backend based on config (S3 only)."""
-    return S3Storage()
+    """Factory: create the appropriate storage backend based on config.
+    
+    - If S3 endpoint + credentials are configured: use S3Storage
+    - Otherwise: use LocalStorage (default for development)
+    """
+    if settings.storage.is_s3:
+        return S3Storage()
+    return LocalStorage()

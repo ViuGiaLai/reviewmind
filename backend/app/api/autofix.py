@@ -6,8 +6,9 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.api.auth import get_current_user_id
 from app.database import create_database
 from app.review.autofix import Suggestion, SuggestionEngine
 
@@ -18,10 +19,13 @@ database = create_database()
 
 # ─── Helper ────────────────────────────────────────────────────────────────────
 
-def _get_session(session_id: str) -> dict[str, Any]:
+def _get_session(session_id: str, user_id: str | None = None) -> dict[str, Any]:
     session = database.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
+    # Verify session belongs to current user
+    if user_id and session.get("user_id") and session["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Session does not belong to this user.")
     return session
 
 
@@ -128,9 +132,12 @@ def _import_issues_as_objects(issues: list[dict[str, Any]]) -> list[Any]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/suggestions")
-def list_suggestions(session_id: str) -> dict[str, Any]:
+def list_suggestions(
+    session_id: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Generate and return autofix suggestions for a session."""
-    session = _get_session(session_id)
+    session = _get_session(session_id, user_id)
     issues = _get_issues(session_id)
 
     # Try to get original document text
@@ -167,9 +174,13 @@ def list_suggestions(session_id: str) -> dict[str, Any]:
 
 
 @router.get("/suggestions/{suggestion_id}")
-def get_suggestion_detail(session_id: str, suggestion_id: str) -> dict[str, Any]:
+def get_suggestion_detail(
+    session_id: str,
+    suggestion_id: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Get detail of a specific suggestion with diff output."""
-    suggestions_resp = list_suggestions(session_id)
+    suggestions_resp = list_suggestions(session_id, user_id)
     for s in suggestions_resp["items"]:
         if s["id"] == suggestion_id:
             diff = engine.generate_diff(s["original_text"], s["suggested_text"])
@@ -183,9 +194,13 @@ def get_suggestion_detail(session_id: str, suggestion_id: str) -> dict[str, Any]
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/apply/{suggestion_id}")
-def apply_suggestion(session_id: str, suggestion_id: str) -> dict[str, Any]:
+def apply_suggestion(
+    session_id: str,
+    suggestion_id: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Apply a single autofix suggestion."""
-    suggestions_resp = list_suggestions(session_id)
+    suggestions_resp = list_suggestions(session_id, user_id)
     target = None
     for s in suggestions_resp["items"]:
         if s["id"] == suggestion_id:
@@ -214,7 +229,7 @@ def apply_suggestion(session_id: str, suggestion_id: str) -> dict[str, Any]:
     )
 
     # Get text and apply
-    session = _get_session(session_id)
+    session = _get_session(session_id, user_id)
     text = _get_document_text(session) or ""
     if not text:
         raise HTTPException(status_code=400, detail="No source document text available for autofix.")
@@ -246,8 +261,13 @@ def apply_suggestion(session_id: str, suggestion_id: str) -> dict[str, Any]:
 
 
 @router.post("/revert/{suggestion_id}")
-def revert_suggestion(session_id: str, suggestion_id: str) -> dict[str, Any]:
+def revert_suggestion(
+    session_id: str,
+    suggestion_id: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Revert a previously applied suggestion."""
+    session = _get_session(session_id, user_id)  # Verify ownership + fetch session
     # Check existing applied suggestions
     existing = database.get_applied_suggestions(session_id)
     target = None
@@ -276,7 +296,6 @@ def revert_suggestion(session_id: str, suggestion_id: str) -> dict[str, Any]:
         applied_at=target.get("applied_at"),
     )
 
-    session = _get_session(session_id)
     text = _get_document_text(session) or ""
     if not text:
         # Try to use the patched document stored in DB
@@ -299,13 +318,17 @@ def revert_suggestion(session_id: str, suggestion_id: str) -> dict[str, Any]:
 
 
 @router.post("/apply-bulk")
-def apply_suggestions_bulk(session_id: str, body: dict[str, Any]) -> dict[str, Any]:
+def apply_suggestions_bulk(
+    session_id: str,
+    body: dict[str, Any],
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Apply multiple suggestions at once."""
     suggestion_ids: list[str] = body.get("suggestion_ids", [])
     if not suggestion_ids:
         raise HTTPException(status_code=400, detail="No suggestion IDs provided.")
 
-    suggestions_resp = list_suggestions(session_id)
+    suggestions_resp = list_suggestions(session_id, user_id)
     targets = [s for s in suggestions_resp["items"] if s["id"] in suggestion_ids and not s["applied"]]
 
     if not targets:
@@ -328,7 +351,7 @@ def apply_suggestions_bulk(session_id: str, body: dict[str, Any]) -> dict[str, A
         for t in targets
     ]
 
-    session = _get_session(session_id)
+    session = _get_session(session_id, user_id)
     text = _get_document_text(session) or ""
     if not text:
         raise HTTPException(status_code=400, detail="No source document text available for autofix.")
@@ -363,9 +386,12 @@ def apply_suggestions_bulk(session_id: str, body: dict[str, Any]) -> dict[str, A
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/history")
-def get_autofix_history(session_id: str) -> dict[str, Any]:
+def get_autofix_history(
+    session_id: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Get the autofix action history for a session."""
-    _get_session(session_id)  # verify session exists
+    _get_session(session_id, user_id)  # verify session exists + ownership
     actions = database.get_autofix_history(session_id)
     return {
         "session_id": session_id,
@@ -375,9 +401,12 @@ def get_autofix_history(session_id: str) -> dict[str, Any]:
 
 
 @router.get("/diff")
-def get_full_diff(session_id: str) -> dict[str, Any]:
+def get_full_diff(
+    session_id: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Get the cumulative diff of all applied suggestions."""
-    _get_session(session_id)
+    _get_session(session_id, user_id)
     actions = database.get_autofix_history(session_id)
 
     # Reconstruct the diff from applied actions

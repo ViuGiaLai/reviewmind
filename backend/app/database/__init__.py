@@ -1,17 +1,24 @@
 from .backend import DatabaseBackend
-from .repository import ReviewRepository
-from .sqlite_adapter import SQLiteAdapter
 from app.config import settings
 
 
 def create_database() -> DatabaseBackend:
-    """Factory: create the appropriate database backend based on config (Postgres only)."""
+    """Factory: create a PostgreSQL database backend.
+
+    Requires REVIEWMIND_PG_DSN to be set in the environment.
+    """
     from .postgres_adapter import PostgresAdapter
-    backend = PostgresAdapter(
-        dsn=settings.database.postgres_dsn,
-    )
+
+    if not settings.database.postgres_dsn:
+        raise RuntimeError(
+            "REVIEWMIND_PG_DSN is not configured. "
+            "Set REVIEWMIND_PG_DSN=postgresql://user:pass@host:5432/dbname "
+            "in your .env file to use PostgreSQL."
+        )
+
+    backend = PostgresAdapter(dsn=settings.database.postgres_dsn)
     backend.initialize()
     return backend
 
 
-__all__ = ["DatabaseBackend", "ReviewRepository", "SQLiteAdapter", "create_database"]
+__all__ = ["DatabaseBackend", "create_database"]

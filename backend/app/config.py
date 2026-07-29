@@ -16,12 +16,7 @@ if _env_path.exists():
 
 @dataclass
 class DatabaseSettings:
-    """Database configuration."""
-
-    # SQLite (default for development)
-    sqlite_path: Path = Path(
-        os.getenv("REVIEWMIND_SQLITE_PATH", str(Path(__file__).resolve().parent.parent / "data" / "reviewmind.sqlite3"))
-    )
+    """Database configuration (PostgreSQL only)."""
 
     # PostgreSQL (production)
     postgres_dsn: str = os.getenv("REVIEWMIND_PG_DSN", "")
@@ -38,9 +33,16 @@ class DatabaseSettings:
 
 @dataclass
 class StorageSettings:
-    """File storage configuration (Cloudflare R2 / S3 only)."""
+    """File storage configuration.
+    Supports S3-compatible (Cloudflare R2, AWS S3, MinIO) or local filesystem.
+    """
     
-    backend: Literal["s3"] = "s3"
+    backend: Literal["local", "s3"] = "local"
+
+    # Local filesystem
+    local_path: Path = Path(
+        os.getenv("REVIEWMIND_STORAGE_PATH", str(Path(__file__).resolve().parent.parent / "data" / "uploads"))
+    )
 
     # S3-compatible storage
     s3_endpoint: str = os.getenv("REVIEWMIND_S3_ENDPOINT", "")
@@ -52,7 +54,8 @@ class StorageSettings:
 
     @property
     def is_s3(self) -> bool:
-        return True
+        """Check whether S3 credentials are configured."""
+        return bool(self.s3_endpoint and self.s3_access_key and self.s3_secret_key)
 
 
 @dataclass
