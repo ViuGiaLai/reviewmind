@@ -6,6 +6,14 @@ from pathlib import Path
 import yaml
 
 
+DEFAULT_PROFILES = {
+    "academic": "academic",
+    "business": "business",
+    "sop": "sop",
+    "technical_design": "technical_design",
+}
+
+
 @dataclass(frozen=True)
 class Profile:
     id: str
@@ -21,7 +29,12 @@ class ProfileLoader:
         self.config_directory = config_directory
 
     def load(self, profile_id: str) -> Profile:
-        path = self.config_directory / "profiles" / f"{profile_id}.yaml"
+        if profile_id == "auto":
+            profile_id = self.detect_profile_from_text("")
+
+        normalized = (profile_id or "academic").strip().casefold()
+        profile_key = DEFAULT_PROFILES.get(normalized, normalized)
+        path = self.config_directory / "profiles" / f"{profile_key}.yaml"
         if not path.is_file():
             raise ValueError(f"Unknown profile: {profile_id}")
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -30,6 +43,18 @@ class ProfileLoader:
             weights=data["weights"], permissions=data["permissions"],
             required_sections=data.get("required_sections", []),
         )
+
+    def detect_profile_from_text(self, text: str) -> str:
+        lowered = text.casefold()
+        if any(token in lowered for token in ("architecture", "component", "configuration", "yaml", "pipeline", "design")):
+            return "technical_design"
+        if any(token in lowered for token in ("abstract", "introduction", "references", "bibliography", "methodology")):
+            return "academic"
+        if any(token in lowered for token in ("executive summary", "proposal", "budget", "timeline")):
+            return "business"
+        if any(token in lowered for token in ("procedure", "revision history", "safety", "compliance")):
+            return "sop"
+        return "academic"
 
     def available(self) -> list[dict[str, str]]:
         return [

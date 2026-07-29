@@ -3,8 +3,11 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 
-from .text import TextParser
 from ..models import DocumentModel
+from .docx_parser import DocxParser
+from .html_parser import HtmlParser
+from .pdf_parser import PdfParser
+from .text import TextParser
 
 
 class UnsupportedDocumentError(ValueError):
@@ -12,33 +15,49 @@ class UnsupportedDocumentError(ValueError):
 
 
 class FileParser:
-    """Transforms uploaded content into the engine's normalized model."""
+    """Transforms uploaded content into the engine's normalized model with rich structure."""
 
-    text_extensions = {".txt", ".md", ".markdown", ".html", ".htm", ".tex"}
+    text_extensions = {".txt", ".md", ".markdown"}
+    html_extensions = {".html", ".htm"}
+    tex_extensions = {".tex"}
 
     def __init__(self) -> None:
         self.text_parser = TextParser()
+        self.docx_parser = DocxParser()
+        self.pdf_parser = PdfParser()
+        self.html_parser = HtmlParser()
 
     def parse(self, content: bytes, filename: str, content_type: str = "") -> DocumentModel:
+        """Parse document content from bytes."""
         suffix = Path(filename).suffix.casefold()
+
+        # Plain text / Markdown
         if suffix in self.text_extensions:
-            return self.text_parser.parse(content.decode("utf-8", errors="replace"), filename, content_type or "text/plain")
+            text = content.decode("utf-8", errors="replace")
+            return self.text_parser.parse(text, filename, content_type or "text/plain")
+
+        # HTML
+        if suffix in self.html_extensions:
+            return self.html_parser.parse(content, filename, content_type or "text/html")
+
+        # LaTeX
+        if suffix in self.tex_extensions:
+            text = content.decode("utf-8", errors="replace")
+            return self.text_parser.parse(text, filename, content_type or "text/x-tex")
+
+        # DOCX
         if suffix == ".docx":
-            return self._docx(content, filename, content_type)
+            return self.docx_parser.parse(
+                content, filename,
+                content_type or "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+
+        # PDF
         if suffix == ".pdf":
-            return self._pdf(content, filename, content_type)
+            return self.pdf_parser.parse(content, filename, content_type or "application/pdf")
+
         raise UnsupportedDocumentError("Supported formats: TXT, Markdown, HTML, LaTex, DOCX and PDF.")
 
-    def _docx(self, content: bytes, filename: str, content_type: str) -> DocumentModel:
-        from docx import Document
-        document = Document(BytesIO(content))
-        text = "\n".join(
-            f"{'#' * min(6, int(p.style.name[-1]))} {p.text}" if p.style.name.startswith("Heading") and p.style.name[-1:].isdigit() else p.text
-            for p in document.paragraphs if p.text.strip()
-        )
-        return self.text_parser.parse(text, filename, content_type or "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-
-    def _pdf(self, content: bytes, filename: str, content_type: str) -> DocumentModel:
-        from pypdf import PdfReader
-        text = "\n\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(content)).pages)
-        return self.text_parser.parse(text, filename, content_type or "application/pdf")
+    def parse_text(self, text: str, filename: str, content_type: str = "") -> DocumentModel:
+        """Parse text directly without encode/decode cycle."""
+        return self.text_parser.parse(text, filename, content_type)
