@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Zap, CheckCircle, CircleX, AlertTriangle, ChevronRight, X, Loader2, FilePen, Check } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 export function AutoFixPlanner({
   session,
@@ -16,6 +17,7 @@ export function AutoFixPlanner({
   onClose: () => void;
   onApplied: () => void;
 }) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [mode, setMode] = useState<"safe" | "selected" | "smart">("safe");
@@ -136,7 +138,7 @@ export function AutoFixPlanner({
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <Zap size={24} style={{ color: 'var(--warning)' }} />
-            <h3>ReviewMind Auto Fix Planner</h3>
+            <h3>{t("autofix.title")}</h3>
           </div>
           <button className="btn-icon" onClick={onClose}><X size={20} /></button>
         </div>
@@ -144,13 +146,13 @@ export function AutoFixPlanner({
         <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
           {loading ? (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 200, gap: 12 }}>
-              <Loader2 size={24} className="spin" /> Analyzing possible fixes...
+              <Loader2 size={24} className="spin" /> {t("autofix.analyzing")}
             </div>
           ) : pendingSuggestions.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
               <CheckCircle size={48} style={{ margin: '0 auto 16px', color: 'var(--success)', opacity: 0.5 }} />
-              <h3>No fixes available</h3>
-              <p>All fixable issues have already been resolved or there are no issues that can be automatically fixed.</p>
+              <h3>{t("autofix.no_fixes")}</h3>
+              <p>{t("autofix.no_fixes_desc")}</p>
             </div>
           ) : (
             <>
@@ -166,8 +168,8 @@ export function AutoFixPlanner({
                   style={{ borderColor: mode === 'safe' ? 'var(--primary)' : 'var(--border)', cursor: 'pointer', padding: 16 }}
                 >
                   <div className="tile-icon success"><CheckCircle size={20} /></div>
-                  <strong style={{ display: 'block', margin: '8px 0 4px' }}>Fix All Safe ⭐⭐⭐⭐⭐</strong>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Auto-fixes guaranteed format, margins, TOC, etc.</p>
+                  <strong style={{ display: 'block', margin: '8px 0 4px' }}>{t("autofix.safe_fix")} ⭐⭐⭐⭐⭐</strong>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t("autofix.safe_fix_desc")}</p>
                 </div>
                 
                 <div 
@@ -179,8 +181,8 @@ export function AutoFixPlanner({
                   style={{ borderColor: mode === 'selected' ? 'var(--primary)' : 'var(--border)', cursor: 'pointer', padding: 16 }}
                 >
                   <div className="tile-icon info"><FilePen size={20} /></div>
-                  <strong style={{ display: 'block', margin: '8px 0 4px' }}>Fix Selected</strong>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Review and select exactly what you want to change.</p>
+                  <strong style={{ display: 'block', margin: '8px 0 4px' }}>{t("autofix.fix_selected")}</strong>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t("autofix.fix_selected_desc")}</p>
                 </div>
 
                 <div 
@@ -192,8 +194,8 @@ export function AutoFixPlanner({
                   style={{ borderColor: mode === 'smart' ? 'var(--primary)' : 'var(--border)', cursor: 'pointer', padding: 16 }}
                 >
                   <div className="tile-icon warning"><Zap size={20} /></div>
-                  <strong style={{ display: 'block', margin: '8px 0 4px' }}>AI Smart Fix</strong>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Allow AI to fix wording and structure. Review required.</p>
+                  <strong style={{ display: 'block', margin: '8px 0 4px' }}>{t("autofix.smart_fix")}</strong>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>{t("autofix.smart_fix_desc")}</p>
                 </div>
               </div>
               
@@ -250,14 +252,14 @@ export function AutoFixPlanner({
         </div>
         
         <div className="modal-footer" style={{ borderTop: '1px solid var(--border)', padding: 20, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-          <button className="btn-secondary" onClick={onClose} disabled={applying}>Cancel</button>
+          <button className="btn-secondary" onClick={onClose} disabled={applying}>{t("autofix.cancel")}</button>
           <button 
             className="btn-primary" 
             onClick={handleApply} 
             disabled={applying || selectedIds.size === 0 || pendingSuggestions.length === 0}
             style={{ minWidth: 140 }}
           >
-            {applying ? <><Loader2 size={16} className="spin" /> Applying...</> : `Apply ${selectedIds.size} Fixes`}
+            {applying ? <><Loader2 size={16} className="spin" /> Applying...</> : `${t("autofix.apply_fixes")} (${selectedIds.size})`}
           </button>
         </div>
       </div>

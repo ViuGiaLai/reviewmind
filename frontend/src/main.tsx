@@ -9,13 +9,15 @@ import {
   Search, Download, Upload, Plus, X, Save, RefreshCw, FilePen, Wrench, Eye, Zap,
   CheckCircle, CircleX, AlertTriangle, Lightbulb, BarChart3, Target,
   Star, ThumbsUp, BookOpen, Bell, User, ChevronRight, Home, Database, Users, Sparkles, Shield, Briefcase, LogIn, LogOut, Trash2, AlertCircle,
-  Clock, Activity, Sliders, Check, ArrowRight, ArrowLeft, Mail, Lock, Loader2
+  Clock, Activity, Sliders, Check, ArrowRight, ArrowLeft, Mail, Lock, Loader2, Play, FastForward
 } from "lucide-react";
 import { QualityInsights } from "./components/QualityInsights";
 import { IssueInspector } from "./components/IssueInspector";
 import { ReviewTimeline } from "./components/ReviewTimeline";
 import { RuleDistributionChart } from "./components/RuleDistributionChart";
 import { AutoFixPlanner } from "./components/AutoFixPlanner";
+import { useTranslation } from "react-i18next";
+import "./i18n";
 import "./styles.css";
 
 /* ── Safe localStorage helpers (handles Safari private mode, storage full) ── */
@@ -101,16 +103,16 @@ interface SidebarSection {
 
 const PAGE_LABELS: Record<Page, string> = {
   landing: "Landing Page",
-  home: "Home",
-  reviews: "Reviews",
+  home: "nav.home",
+  reviews: "nav.reviews",
   "review-new": "New Review",
   "review-detail": "Review Detail",
   documents: "Documents",
   history: "History",
-  profiles: "Profiles",
-  kbpacks: "Knowledge Packs",
-  ai: "AI Assistant",
-  settings: "Settings",
+  profiles: "nav.profiles",
+  kbpacks: "nav.kbpacks",
+  ai: "nav.ai",
+  settings: "nav.settings",
 };
 
 interface DocumentItem {
@@ -133,6 +135,7 @@ function breadcrumb(page: Page, docName?: string): { label: string; page?: Page 
 }
 
 function App() {
+  const { t, i18n } = useTranslation();
   const [page, setPage] = useState<Page>("home");
   const [theme, setTheme] = useState<"light" | "dark">(() => (safeGetItem("theme") as "light" | "dark") || "dark");
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -231,29 +234,23 @@ function App() {
     if (page === "landing") setPage("home");
   }
 
-
-
   const sidebarSections: SidebarSection[] = [
     {
       label: "Workspace",
       items: [
-        { id: "home", label: "Home", Icon: LayoutDashboard },
-        { id: "reviews", label: "Reviews", Icon: FileText },
+        { id: "home", label: t("nav.home"), Icon: LayoutDashboard },
+        { id: "reviews", label: t("nav.reviews"), Icon: FileText },
         { id: "documents", label: "Documents", Icon: FolderOpen },
-        { id: "history", label: "History", Icon: History },
+        { id: "history", label: t("dashboard.history"), Icon: History },
       ],
     },
     {
       label: "Configuration",
       items: [
-        { id: "profiles", label: "Profiles", Icon: Users },
-        { id: "kbpacks", label: "Knowledge Packs", Icon: BookOpen },
-      ],
-    },
-    {
-      label: "Tools",
-      items: [
-        { id: "ai", label: "AI Assistant", Icon: Bot },
+        { id: "profiles", label: t("nav.profiles"), Icon: Users },
+        { id: "kbpacks", label: t("nav.kbpacks"), Icon: BookOpen },
+        { id: "ai", label: t("nav.ai"), Icon: Bot },
+        { id: "settings", label: t("nav.settings"), Icon: Settings },
       ],
     },
   ];
@@ -569,8 +566,20 @@ function App() {
         </div>
 
         <div className="header-actions">
+          <button 
+            className="theme-toggle" 
+            onClick={() => {
+              const newLang = i18n.language === "en" ? "vi" : "en";
+              i18n.changeLanguage(newLang);
+              localStorage.setItem("i18nextLng", newLang);
+            }} 
+            data-tooltip="Toggle Language"
+            style={{ fontSize: '0.8rem', fontWeight: 'bold' }}
+          >
+            {i18n.language === "en" ? "EN" : "VI"}
+          </button>
           <button className="theme-toggle" onClick={() => setTheme(theme === "light" ? "dark" : "light")} data-tooltip={theme === "light" ? "Dark mode" : "Light mode"}>
-            {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
+            {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
           </button>
 
           <div ref={notifRef} style={{ position: "relative" }}>
@@ -824,6 +833,7 @@ function DashboardView({ session, onSelectIssue, selectedIssue, onUpdateStatus, 
   onNavigatePage?: (page: Page) => void;
   apiFetch: (url: string, options?: RequestInit) => Promise<Response>;
 }) {
+  const { t } = useTranslation();
   const [showRerunMenu, setShowRerunMenu] = useState(false);
   const [showAutoFix, setShowAutoFix] = useState(false);
   const rerunRef = useRef<HTMLDivElement>(null);
@@ -859,12 +869,12 @@ function DashboardView({ session, onSelectIssue, selectedIssue, onUpdateStatus, 
   };
 
   const pipeline = session.pipeline_status || {
-    parser: { status: "completed", label: "Document Parsed" },
-    profile: { status: "completed", label: `${session.profile_id} Profile` },
+    parser: { status: "completed", label: t("dashboard.parser") },
+    profile: { status: "completed", label: `${session.profile_id}` },
     knowledge_pack: { status: "completed", label: session.pack_ids?.length ? `${session.pack_ids.length} Pack(s)` : "Base Pack" },
-    rule_engine: { status: "completed", label: `${ruleStats.loaded} Rules Executed` },
-    ai_scheduler: { status: "skipped", label: "Rule-First: AI Skipped" },
-    autofix: { status: "ready", label: `${session.issues.filter(i => i.autofix_allowed).length} Fixes Ready` },
+    rule_engine: { status: "completed", label: `${ruleStats.loaded} ${t("dashboard.rules_loaded")}` },
+    ai_scheduler: { status: "skipped", label: t("dashboard.ai_scheduler") },
+    autofix: { status: "ready", label: `${session.issues.filter(i => i.autofix_allowed).length} Ready` },
   };
 
   function handleExportReport() {
@@ -926,44 +936,44 @@ function DashboardView({ session, onSelectIssue, selectedIssue, onUpdateStatus, 
             )}
           </div>
           <button className="btn-secondary" onClick={handleExportReport} data-tooltip="Export Report">
-            <Download size={15} /> Export Report
+            <Download size={15} /> {t("dashboard.export_report")}
           </button>
           <button className="btn-secondary" onClick={() => onNavigatePage?.("history")} data-tooltip="View History">
-            <History size={15} /> History
+            <History size={15} /> {t("dashboard.history")}
           </button>
         </div>
       </div>
 
       {/* ── Pipeline Status Component (Item 7) ────────────────────────────────── */}
       <div className="pipeline-banner card">
-        <h4 className="section-subtitle"><Activity size={16} /> Review Pipeline Status</h4>
+        <h4 className="section-subtitle"><Activity size={16} /> {t("dashboard.pipeline_status")}</h4>
         <div className="pipeline-steps-grid">
           <div className="pipe-step-card completed">
-            <div className="pipe-step-head"><CheckCircle size={16} className="pipe-icon done" /><strong>1. Parser</strong></div>
-            <div className="pipe-step-label">{pipeline.parser?.label || "DOCX Parsed"}</div>
+            <div className="pipe-step-head"><CheckCircle size={16} className="pipe-icon done" /><strong>{t("dashboard.parser")}</strong></div>
+            <p>{pipeline.parser.label}</p>
           </div>
           <div className="pipe-step-card completed">
-            <div className="pipe-step-head"><CheckCircle size={16} className="pipe-icon done" /><strong>2. Profile Detection</strong></div>
-            <div className="pipe-step-label">{pipeline.profile?.label || session.profile_id}</div>
+            <div className="pipe-step-head"><CheckCircle size={16} className="pipe-icon done" /><strong>{t("dashboard.profile_detection")}</strong></div>
+            <p>{pipeline.profile.label}</p>
           </div>
           <div className="pipe-step-card completed">
-            <div className="pipe-step-head"><CheckCircle size={16} className="pipe-icon done" /><strong>3. Knowledge Pack</strong></div>
-            <div className="pipe-step-label">{pipeline.knowledge_pack?.label || "Base Pack"}</div>
+            <div className="pipe-step-head"><CheckCircle size={16} className="pipe-icon done" /><strong>{t("dashboard.knowledge_pack")}</strong></div>
+            <p>{pipeline.knowledge_pack.label}</p>
           </div>
           <div className="pipe-step-card completed">
-            <div className="pipe-step-head"><CheckCircle size={16} className="pipe-icon done" /><strong>4. Rule Engine</strong></div>
-            <div className="pipe-step-label">{pipeline.rule_engine?.label || `${ruleStats.loaded} Rules Executed`}</div>
+            <div className="pipe-step-head"><CheckCircle size={16} className="pipe-icon done" /><strong>{t("dashboard.rule_engine")}</strong></div>
+            <p>{pipeline.rule_engine.label}</p>
           </div>
-          <div className={`pipe-step-card ${pipeline.ai_scheduler?.status === "completed" ? "completed" : "skipped"}`}>
+          <div className="pipe-step-card skipped">
+            <div className="pipe-step-head"><FastForward size={16} className="pipe-icon skip" /><strong>{t("dashboard.ai_scheduler")}</strong></div>
+            <p>{pipeline.ai_scheduler.label}</p>
+          </div>
+          <div className={`pipe-step-card ${pipeline.autofix.status === 'ready' ? 'ready' : 'skipped'} clickable`} onClick={() => setShowAutoFix(true)}>
             <div className="pipe-step-head">
-              {pipeline.ai_scheduler?.status === "completed" ? <Bot size={16} className="pipe-icon done" /> : <Zap size={16} className="pipe-icon skipped" />}
-              <strong>5. AI Scheduler</strong>
+              {pipeline.autofix.status === 'ready' ? <Play size={16} className="pipe-icon ready" /> : <FastForward size={16} className="pipe-icon skip" />}
+              <strong>{t("dashboard.auto_fix_engine")}</strong>
             </div>
-            <div className="pipe-step-label">{pipeline.ai_scheduler?.label || "Skipped (Rules Satisfied)"}</div>
-          </div>
-          <div className="pipe-step-card ready" style={{ cursor: 'pointer' }} onClick={() => setShowAutoFix(true)}>
-            <div className="pipe-step-head"><Wrench size={16} className="pipe-icon ready" /><strong>6. Auto Fix Engine</strong></div>
-            <div className="pipe-step-label">{pipeline.autofix?.label || "Ready (Click to Open)"}</div>
+            <p>{pipeline.autofix.label}</p>
           </div>
         </div>
       </div>
@@ -1004,28 +1014,28 @@ function DashboardView({ session, onSelectIssue, selectedIssue, onUpdateStatus, 
       <div className="dashboard-stats-split">
         {/* Document Statistics */}
         <div className="card stat-group-card">
-          <h3 className="chart-title"><FileText size={16} /> Document Statistics</h3>
+          <h3 className="chart-title"><FileText size={16} /> {t("dashboard.doc_stats")}</h3>
           <div className="stats-mini-grid">
-            <div className="stat-mini-box"><span className="mini-val">{docStats.pages}</span><span className="mini-lbl">Pages</span></div>
-            <div className="stat-mini-box"><span className="mini-val">{docStats.paragraphs}</span><span className="mini-lbl">Paragraphs</span></div>
-            <div className="stat-mini-box"><span className="mini-val">{docStats.headings}</span><span className="mini-lbl">Headings</span></div>
-            <div className="stat-mini-box"><span className="mini-val">{docStats.tables}</span><span className="mini-lbl">Tables</span></div>
-            <div className="stat-mini-box"><span className="mini-val">{docStats.figures}</span><span className="mini-lbl">Figures</span></div>
-            <div className="stat-mini-box"><span className="mini-val">{docStats.words.toLocaleString()}</span><span className="mini-lbl">Words</span></div>
-            <div className="stat-mini-box"><span className="mini-val">{docStats.references}</span><span className="mini-lbl">References</span></div>
-            <div className="stat-mini-box"><span className="mini-val">{docStats.chars.toLocaleString()}</span><span className="mini-lbl">Characters</span></div>
+            <div className="stat-mini-box"><span className="mini-val">{docStats.pages}</span><span className="mini-lbl">{t("dashboard.pages")}</span></div>
+            <div className="stat-mini-box"><span className="mini-val">{docStats.paragraphs}</span><span className="mini-lbl">{t("dashboard.paragraphs")}</span></div>
+            <div className="stat-mini-box"><span className="mini-val">{docStats.headings}</span><span className="mini-lbl">{t("dashboard.headings")}</span></div>
+            <div className="stat-mini-box"><span className="mini-val">{docStats.tables}</span><span className="mini-lbl">{t("dashboard.tables")}</span></div>
+            <div className="stat-mini-box"><span className="mini-val">{docStats.figures}</span><span className="mini-lbl">{t("dashboard.figures")}</span></div>
+            <div className="stat-mini-box"><span className="mini-val">{docStats.words.toLocaleString()}</span><span className="mini-lbl">{t("dashboard.words")}</span></div>
+            <div className="stat-mini-box"><span className="mini-val">{docStats.references}</span><span className="mini-lbl">{t("dashboard.references")}</span></div>
+            <div className="stat-mini-box"><span className="mini-val">{docStats.chars.toLocaleString()}</span><span className="mini-lbl">{t("dashboard.chars")}</span></div>
           </div>
         </div>
 
         {/* Rule Engine Statistics */}
         <div className="card stat-group-card">
-          <h3 className="chart-title"><Shield size={16} /> Rule Engine Statistics</h3>
+          <h3 className="chart-title"><Shield size={16} /> {t("dashboard.rule_stats")}</h3>
           <div className="stats-mini-grid">
-            <div className="stat-mini-box"><span className="mini-val" style={{ color: "var(--primary)" }}>{ruleStats.loaded}</span><span className="mini-lbl">Rules Loaded</span></div>
-            <div className="stat-mini-box"><span className="mini-val" style={{ color: "var(--success)" }}>{ruleStats.passed}</span><span className="mini-lbl">Passed</span></div>
-            <div className="stat-mini-box"><span className="mini-val" style={{ color: "var(--danger)" }}>{ruleStats.failed}</span><span className="mini-lbl">Failed</span></div>
-            <div className="stat-mini-box"><span className="mini-val">{ruleStats.skipped}</span><span className="mini-lbl">Skipped</span></div>
-            <div className="stat-mini-box full"><span className="mini-val">{ruleStats.execution_ms} ms</span><span className="mini-lbl">Execution Time</span></div>
+            <div className="stat-mini-box"><span className="mini-val" style={{ color: "var(--primary)" }}>{ruleStats.loaded}</span><span className="mini-lbl">{t("dashboard.rules_loaded")}</span></div>
+            <div className="stat-mini-box"><span className="mini-val" style={{ color: "var(--success)" }}>{ruleStats.passed}</span><span className="mini-lbl">{t("dashboard.passed")}</span></div>
+            <div className="stat-mini-box"><span className="mini-val" style={{ color: "var(--danger)" }}>{ruleStats.failed}</span><span className="mini-lbl">{t("dashboard.failed")}</span></div>
+            <div className="stat-mini-box"><span className="mini-val">{ruleStats.skipped}</span><span className="mini-lbl">{t("dashboard.skipped")}</span></div>
+            <div className="stat-mini-box full"><span className="mini-val">{ruleStats.execution_ms} ms</span><span className="mini-lbl">{t("dashboard.execution_time")}</span></div>
           </div>
         </div>
       </div>
@@ -1090,6 +1100,7 @@ function ReviewWizardView({
   apiFetch: (url: string, options?: RequestInit) => Promise<Response>;
   API_URL: string;
 }) {
+  const { t } = useTranslation();
   const [step, setStep] = useState<number>(() => Number(safeGetItem("rw_step")) || 1);
   const [selectedPacks, setSelectedPacks] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem("rw_packs") || '["academic_base"]'); } catch { return ["academic_base"]; }
@@ -1230,11 +1241,11 @@ function ReviewWizardView({
       {/* ── Wizard Steps Header ───────────────────────────────────────────────── */}
       <div className="wizard-stepper card">
         {[
-          { num: 1, label: "Document Upload", Icon: Upload },
-          { num: 2, label: "Profile & Auto-Detect", Icon: Target },
-          { num: 3, label: "Knowledge Pack", Icon: BookOpen },
-          { num: 4, label: "Configuration", Icon: Sliders },
-          { num: 5, label: "Review Summary", Icon: CheckCircle },
+          { num: 1, label: t("wizard.step_1"), Icon: Upload },
+          { num: 2, label: t("wizard.step_2"), Icon: Target },
+          { num: 3, label: t("wizard.step_3"), Icon: BookOpen },
+          { num: 4, label: t("wizard.step_4"), Icon: Sliders },
+          { num: 5, label: t("wizard.start_review"), Icon: CheckCircle },
         ].map((st) => (
           <div key={st.num} className={`wizard-step-item ${step === st.num ? "active" : step > st.num ? "completed" : ""}`} onClick={() => setStep(st.num)}>
             <div className="step-badge">{step > st.num ? <Check size={14} /> : st.num}</div>
