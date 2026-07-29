@@ -3,7 +3,8 @@ from __future__ import annotations
 import csv
 import io
 import json
-from dataclasses import asdict
+import threading
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,12 +12,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from app.api.auth import get_current_user_id
+from app.api.auth import get_current_user_id, require_resource_owner
+from app.config import settings
 from app.database import create_database
+from app.operations import metrics
 from app.review import ReviewEngine, ReviewRequest
 from app.review.models import ReviewResult
 from app.review.parser import FileParser
 from app.storage import create_storage
+from app.security import audit_log
 
 router = APIRouter(prefix="/api", tags=["review"])
 
@@ -24,6 +28,7 @@ engine = ReviewEngine()
 file_parser = FileParser()
 database = create_database()
 storage = create_storage()
+_review_slots = threading.BoundedSemaphore(settings.performance.max_concurrent_reviews)
 
 # ─── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -34,7 +39,10 @@ class ReviewBody(BaseModel):
     profile_id: str = "academic"
     pack_ids: list[str] = []
     enabled_categories: list[str] | None = None
+    review_mode: str = Field(default="rule_ai", pattern=r"^(rule_only|rule_ai|full)$")
+    report_language: str = Field(default="en", pattern=r"^(en|vi)$")
     document_id: str | None = None
+    template_id: str | None = None
 
 
 class IssueUpdateBody(BaseModel):
@@ -53,13 +61,8 @@ class ExportQuery(BaseModel):
 # ─── Helper ────────────────────────────────────────────────────────────────────
 
 def _verify_session_owner(session_id: str, user_id: str | None) -> dict[str, Any]:
-    """Verify session exists and belongs to current user. Returns session dict."""
-    session = database.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
-    if user_id and session.get("user_id") and session["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Session does not belong to this user.")
-    return session
+    """Return a session only when it belongs to the active account."""
+    return require_resource_owner(database.get_session(session_id), user_id, "Session not found.")
 
 
 def _run_review(
@@ -69,6 +72,14 @@ def _run_review(
     profile_id: str,
     pack_ids: list[str],
     enabled_categories: list[str] | None,
+    review_mode: str = "rule_ai",
+    report_language: str = "en",
+    source_content: bytes | None = None,
+    reference_template: dict[str, Any] | None = None,
+    reference_template_id: str = "",
+    profile_overrides: dict[str, Any] | None = None,
+    scoring_mode: str = "standard",
+    auto_fix_enabled: bool = True,
 ) -> tuple[dict[str, Any], ReviewResult]:
     """Run a review and return both the dict form and the domain object."""
     request = ReviewRequest(
@@ -78,10 +89,37 @@ def _run_review(
         profile_id=profile_id,
         pack_ids=pack_ids,
         enabled_categories=enabled_categories,
+        review_mode=review_mode,
+        report_language=report_language,
+        source_content=source_content,
+        reference_template=reference_template,
+        reference_template_id=reference_template_id,
+        profile_overrides=profile_overrides or {},
+        scoring_mode=scoring_mode,
     )
-    result = engine.review(request)
-    result_dict = asdict(result)
-    return result_dict, result
+    acquired = _review_slots.acquire(
+        timeout=settings.performance.review_queue_timeout_seconds
+    )
+    if not acquired:
+        metrics.increment("reviewmind_review_rejected_total", reason="capacity")
+        raise HTTPException(
+            status_code=503,
+            detail="Review capacity is temporarily full. Retry shortly.",
+            headers={"Retry-After": "2"},
+        )
+    metrics.increment("reviewmind_reviews_inflight", value=1)
+    try:
+        result = engine.review(request)
+        if not auto_fix_enabled:
+            result = replace(
+                result,
+                issues=[replace(issue, autofix_allowed=False) for issue in result.issues],
+            )
+        result_dict = asdict(result)
+        return result_dict, result
+    finally:
+        metrics.increment("reviewmind_reviews_inflight", value=-1)
+        _review_slots.release()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -109,17 +147,63 @@ def review_text(
         doc_id = body.document_id
         filename = body.filename
         content_type = body.content_type
+        source_content: bytes | None = None
+        template_record: dict[str, Any] | None = None
+
+        execution_profile_id = body.profile_id
+        effective_pack_ids = body.pack_ids
+        effective_categories = body.enabled_categories
+        effective_review_mode = body.review_mode
+        effective_language = body.report_language
+        effective_template_id = body.template_id
+        profile_overrides: dict[str, Any] = {}
+        scoring_mode = "standard"
+        auto_fix_enabled = True
+
+        try:
+            engine.profiles.load(body.profile_id)
+        except ValueError:
+            custom_profile = require_resource_owner(
+                database.get_evaluation_profile(body.profile_id), user_id,
+                "Evaluation profile not found.",
+            )
+            execution_profile_id = custom_profile["base_profile_id"]
+            effective_pack_ids = body.pack_ids or custom_profile["knowledge_pack_ids"]
+            effective_categories = body.enabled_categories or custom_profile["enabled_categories"]
+            effective_template_id = body.template_id or custom_profile.get("reference_template_id")
+            effective_language = custom_profile["language"]
+            scoring_mode = custom_profile["review_mode"]
+            auto_fix_enabled = custom_profile["auto_fix_enabled"]
+            if not custom_profile["ai_review_enabled"]:
+                effective_review_mode = "rule_only"
+            base_profile = engine.profiles.load(execution_profile_id)
+            categories = effective_categories or base_profile.categories
+            weights = (
+                {category: 1 for category in categories}
+                if custom_profile["scoring_profile"] == "equal"
+                else {category: base_profile.weights.get(category, 1) for category in categories}
+            )
+            profile_overrides = {
+                "id": custom_profile["id"],
+                "name": custom_profile["name"],
+                "categories": categories,
+                "weights": weights,
+            }
+
+        if effective_template_id:
+            template_record = require_resource_owner(
+                database.get_reference_template(effective_template_id), user_id,
+                "Reference template not found.",
+            )
 
         # ── Resolve document content ──
         if doc_id:
             # Fetch from storage + parse
-            doc_record = database.get_document(doc_id)
-            if not doc_record:
-                raise HTTPException(status_code=404, detail=f"Document with id '{doc_id}' not found.")
-            # Verify document belongs to current user
-            if user_id and doc_record.get("user_id") and doc_record["user_id"] != user_id:
-                raise HTTPException(status_code=403, detail="Document does not belong to this user.")
+            doc_record = require_resource_owner(
+                database.get_document(doc_id), user_id, "Document not found."
+            )
             content = storage.read(doc_record["storage_path"])
+            source_content = content
             filename = doc_record["original_name"]
             content_type = doc_record.get("content_type", "application/octet-stream")
             document = file_parser.parse(content, filename, content_type)
@@ -135,23 +219,53 @@ def review_text(
             text=text,
             filename=filename,
             content_type=content_type,
-            profile_id=body.profile_id,
-            pack_ids=body.pack_ids,
-            enabled_categories=body.enabled_categories,
+            profile_id=execution_profile_id,
+            pack_ids=effective_pack_ids,
+            enabled_categories=effective_categories,
+            review_mode=effective_review_mode,
+            report_language=effective_language,
+            source_content=source_content,
+            reference_template=template_record.get("analysis") if template_record else None,
+            reference_template_id=effective_template_id or "",
+            profile_overrides=profile_overrides,
+            scoring_mode=scoring_mode,
+            auto_fix_enabled=auto_fix_enabled,
         )
+
+        # Persist raw-text reviews as documents too. Auto Fix retrieves its
+        # immutable source through session.document_id, so leaving this null
+        # made the primary paste-text flow impossible to fix or version.
+        if not doc_id:
+            encoded = text.encode("utf-8")
+            storage_path, _ = storage.save(encoded, filename)
+            doc_id = database.save_document(
+                original_name=filename,
+                content_type=content_type,
+                size=len(encoded),
+                storage_path=storage_path,
+                user_id=user_id,
+            )
 
         session_id = database.save_session(
             filename=filename,
             profile_id=body.profile_id,
-            pack_ids=body.pack_ids,
+            pack_ids=effective_pack_ids,
             categories=list(result_dict["category_scores"].keys()),
             result=result_obj,
             document_id=doc_id,
             user_id=user_id,
+            reference_template_id=effective_template_id,
+        )
+        audit_log.record(
+            actor_id=user_id or "anonymous", action="review.completed",
+            resource_type="review_session", resource_id=session_id,
+            metadata={"profile_id": body.profile_id, "score": result_obj.score},
         )
         result_dict["session_id"] = session_id
         result_dict["document_id"] = doc_id
         result_dict["filename"] = filename
+        result_dict["template_id"] = effective_template_id
+        result_dict["template_name"] = template_record.get("original_name") if template_record else None
 
         # Replace issues with DB-stored issues so they have real UUIDs,
         # not the engine's rule_id-style IDs.
@@ -207,12 +321,8 @@ def get_session_detail(
     user_id: str | None = Depends(get_current_user_id),
 ) -> dict[str, Any]:
     """Get full detail of a review session including issues."""
-    session = database.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
-    # Verify session belongs to current user
-    if user_id and session.get("user_id") and session["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Session does not belong to this user.")
+    session = _verify_session_owner(session_id, user_id)
+
 
     issues, issue_count = database.list_issues(session_id=session_id, limit=500)
     session["issues"] = issues
@@ -220,7 +330,7 @@ def get_session_detail(
 
     # Get document info if available
     if session.get("document_id"):
-        doc = database.get_document(session["document_id"])
+        doc = require_resource_owner(database.get_document(session["document_id"]), user_id, "Document not found.")
         session["document"] = doc
 
     return session
@@ -232,12 +342,8 @@ def delete_session(
     user_id: str | None = Depends(get_current_user_id),
 ) -> dict[str, str]:
     """Delete a review session and its issues."""
-    session = database.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
-    # Verify session belongs to current user
-    if user_id and session.get("user_id") and session["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Session does not belong to this user.")
+    session = _verify_session_owner(session_id, user_id)
+
     if not database.delete_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
     return {"status": "deleted"}
@@ -282,6 +388,67 @@ def list_session_issues(
     }
 
 
+@router.get("/sessions/{session_id}/insights")
+def get_session_insights(
+    session_id: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    """Get rich insights and recommendations for a session."""
+    session = _verify_session_owner(session_id, user_id)
+    issues, _ = database.list_issues(session_id=session_id, limit=500)
+
+    from app.review.report.insights import InsightsEngine
+    from app.review.profiles import ProfileLoader
+    from dataclasses import dataclass
+
+    # We need to construct mock Issue objects for the InsightsEngine
+    @dataclass
+    class MockIssue:
+        category: str
+        severity: Any
+        rule_id: str
+        message: str
+        recommendation: str
+        autofix_allowed: bool
+        source: str
+
+    @dataclass
+    class MockSeverity:
+        value: str
+
+    mock_issues = []
+    for issue in issues:
+        mock_issues.append(MockIssue(
+            category=issue.get("category", "other"),
+            severity=MockSeverity(value=issue.get("severity", "medium")),
+            rule_id=issue.get("rule_id", ""),
+            message=issue.get("message", ""),
+            recommendation=issue.get("recommendation", ""),
+            autofix_allowed=bool(issue.get("autofix_allowed", False)),
+            source=issue.get("source", "rule"),
+        ))
+
+    # Get profile
+    try:
+        from pathlib import Path
+        config_dir = Path(__file__).resolve().parents[3] / "config"
+        loader = ProfileLoader(config_dir)
+        profile = loader.load(session.get("profile_id", "academic"))
+    except Exception:
+        profile = None
+
+    engine = InsightsEngine()
+    report = engine.generate_report(
+        issues=mock_issues,
+        score=session.get("score", 0),
+        category_scores=session.get("category_scores", {}),
+        profile=profile,
+    )
+
+    from dataclasses import asdict, replace
+    return asdict(report)
+
+
 @router.get("/sessions/{session_id}/issues/stats")
 def get_issue_stats(
     session_id: str,
@@ -323,9 +490,11 @@ def get_issue_detail(
     issue = database.get_issue(issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found.")
+    if issue.get("session_id") != session_id:
+        raise HTTPException(status_code=404, detail="Issue not found in this session.")
 
     # Get history of same issue pattern across previous scans
-    history = database.get_issue_history(issue["issue_id"], session_id)
+    history = database.get_issue_history(issue["issue_id"], session_id, user_id=user_id)
     issue["scan_history"] = history
 
     return issue
@@ -343,6 +512,8 @@ def update_issue_status(
     issue = database.get_issue(issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found.")
+    if issue.get("session_id") != session_id:
+        raise HTTPException(status_code=404, detail="Issue not found in this session.")
 
     database.update_issue_status(issue_id, body.status)
     return {"id": issue_id, "status": body.status}
@@ -823,10 +994,16 @@ def get_profile_detail(profile_id: str) -> dict[str, Any]:
         return {
             "id": profile.id,
             "name": profile.name,
+            "description": profile.description,
+            "document_types": profile.document_types,
             "categories": profile.categories,
             "weights": profile.weights,
             "permissions": profile.permissions,
             "required_sections": profile.required_sections,
+            "forbidden_sections": profile.forbidden_sections,
+            "rubric": profile.rubric,
+            "ai_focus": profile.ai_focus,
+            "auto_fix_policy": profile.auto_fix_policy,
             "compatible_packs": packs,
         }
     except ValueError as error:

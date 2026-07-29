@@ -118,9 +118,11 @@ def test_postgres_adapter_reconnects_after_connection_is_closed(monkeypatch):
     monkeypatch.setitem(sys.modules, "psycopg2", FakePsycopgModule())
     monkeypatch.setitem(sys.modules, "psycopg2.extras", types.SimpleNamespace(RealDictCursor=object))
 
-    from app.database.postgres_adapter import PostgresAdapter
+    from app.database import postgres_adapter as postgres_module
 
-    adapter = PostgresAdapter("postgresql://test")
+    monkeypatch.setattr(postgres_module, "pg_pool", None)
+    monkeypatch.setattr(postgres_module.psycopg2, "connect", FakePsycopgModule.connect)
+    adapter = postgres_module.PostgresAdapter("postgresql://test")
     assert adapter.get_user("u1") is not None
     assert adapter.get_user("u1") is not None
     assert len(created) >= 2

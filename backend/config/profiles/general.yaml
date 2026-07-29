@@ -1,0 +1,32 @@
+id: general
+name: General Review
+description: "Default catch-all profile"
+version: "2.0.0"
+document_types:
+  - report
+  - essay
+  - letter
+  - memo
+  - presentation
+categories: [structure, writing, formatting]
+weights:
+  structure: 35
+  writing: 40
+  formatting: 25
+permissions:
+  writing: 3
+  formatting: 3
+  structure: 3
+required_sections: []
+forbidden_sections: []
+rubric:
+  structure: "Logical organization of ideas"
+  writing: "Clear, grammatically correct writing"
+  formatting: "Readable and consistent formatting"
+ai_focus:
+  - clarity
+  - grammar
+auto_fix_policy:
+  formatting: safe
+  structure: assisted
+  writing: ai

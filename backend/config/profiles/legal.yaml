@@ -1,0 +1,35 @@
+id: legal
+name: Legal Document
+description: "For contracts, policies, legal documents"
+version: "2.0.0"
+document_types:
+  - contract
+  - legal_brief
+  - policy
+  - regulation
+categories: [structure, writing, formatting, compliance]
+weights:
+  structure: 30
+  writing: 25
+  formatting: 20
+  compliance: 25
+permissions:
+  writing: 2
+  formatting: 3
+  structure: 3
+  compliance: 1
+required_sections: [Parties, Terms, Definitions]
+forbidden_sections: []
+rubric:
+  structure: "Standard legal clauses and definitions"
+  writing: "Precise, unambiguous legal language"
+  formatting: "Numbered clauses and sections"
+  compliance: "Legally sound and compliant with regulations"
+ai_focus:
+  - ambiguity
+  - definitions
+auto_fix_policy:
+  formatting: safe
+  structure: manual
+  writing: manual
+  compliance: manual

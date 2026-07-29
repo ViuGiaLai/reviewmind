@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Issue, SessionDetail } from "../main";
+import type { ApiFetch, Issue, SessionDetail } from "../domain/types";
 import { DiffViewer } from "./DiffViewer";
 import { FileText, Settings, Bot, Zap, ScrollText, MapPin, Ruler, Check, Slash, X, CheckCircle, CircleX, ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -15,9 +15,9 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
   issues?: Issue[];
   issueIndex?: number;
   onNavigate?: (index: number) => void;
-  apiFetch: (url: string, options?: RequestInit) => Promise<Response>;
+  apiFetch: ApiFetch;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [activeSection, setActiveSection] = useState<"evidence" | "rule" | "ai" | "autofix" | "history">("evidence");
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -49,18 +49,12 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
       });
       if (response.ok) {
         const data = await response.json();
-        setAiExplanation(data.explanation || data.response || "AI explanation generated.");
+        setAiExplanation(data.explanation || data.response || t("inspector.ai_generated"));
       } else {
-        throw new Error("API error");
+        throw new Error(t("errors.api_error"));
       }
     } catch {
-      setAiExplanation(
-        `**Rule Analysis: ${iss.rule_id}**\n\n` +
-        `This issue was flagged under the **${iss.category}** category with ${iss.confidence}% confidence.\n\n` +
-        `**Why it matters:** ${iss.recommendation}\n\n` +
-        `**Context:** The ${iss.category} category checks for specific patterns. ` +
-        `At ${iss.confidence}% confidence, this is ${iss.confidence >= 90 ? "very likely" : "likely"} a genuine issue.`
-      );
+      setAiExplanation(t("inspector.ai_fallback", { rule: iss.rule_id, category: iss.category, confidence: iss.confidence, recommendation: iss.recommendation }));
     } finally {
       setAiLoading(false);
     }
@@ -81,19 +75,19 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
         const match = items.find((s: any) => s.issue_id === iss.id || s.rule_id === iss.rule_id);
         if (match) {
           setAutoFixSuggestion({
-            original: match.original_text || iss.evidence_excerpt || "Original text",
-            suggested: match.suggested_text || "[Fixed] " + (iss.evidence_excerpt || "Suggested text"),
+            original: match.original_text || iss.evidence_excerpt || t("inspector.original_text"),
+            suggested: match.suggested_text || t("inspector.fixed_prefix") + (iss.evidence_excerpt || t("inspector.suggested_text")),
           });
         } else {
-          throw new Error("No matching suggestion");
+          throw new Error(t("errors.no_matching_suggestion"));
         }
       } else {
-        throw new Error("API error");
+        throw new Error(t("errors.api_error"));
       }
     } catch {
       setAutoFixSuggestion({
-        original: iss.evidence_excerpt || "Original text",
-        suggested: "[Fixed] " + (iss.evidence_excerpt || "Suggested text"),
+        original: iss.evidence_excerpt || t("inspector.original_text"),
+        suggested: t("inspector.fixed_prefix") + (iss.evidence_excerpt || t("inspector.suggested_text")),
       });
     } finally {
       setFixLoading(false);
@@ -101,22 +95,25 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
   }
 
   async function handleApplyFix() {
-    setFixApplied(true);
     try {
-      // First get suggestions to find the suggestion ID
       const suggestionsResp = await apiFetch(`${API_URL}/api/sessions/${session.id}/autofix/suggestions`);
-      if (suggestionsResp.ok) {
-        const suggestionsData = await suggestionsResp.json();
-        const match = (suggestionsData.items || []).find((s: any) =>
-          s.issue_id === iss.id || s.rule_id === iss.rule_id
-        );
-        if (match) {
-          await apiFetch(`${API_URL}/api/sessions/${session.id}/autofix/apply/${match.id}`, {
-            method: "POST",
-          });
-        }
-      }
-    } catch { }
+      if (!suggestionsResp.ok) throw new Error(await suggestionsResp.text());
+      const suggestionsData = await suggestionsResp.json();
+      const match = (suggestionsData.items || []).find((s: any) =>
+        s.issue_id === iss.id || s.rule_id === iss.rule_id
+      );
+      if (!match) throw new Error(t("errors.no_matching_suggestion"));
+
+      const response = await apiFetch(`${API_URL}/api/sessions/${session.id}/autofix/apply/${match.id}`, {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error(await response.text());
+      setFixApplied(true);
+      onUpdateStatus?.(iss.id, "resolved");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      alert(t("errors.apply_fix_failed", { message: error instanceof Error ? error.message : t("common.unknown_error") }));
+    }
   }
 
   useEffect(() => { setActiveSection("evidence"); setAiExplanation(null); setAutoFixSuggestion(null); setFixApplied(false); }, [iss.id]);
@@ -173,17 +170,17 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
                   <blockquote className="inspector-quote">"{issue.evidence_excerpt}"</blockquote>
                   <div className="inspector-location">
                     <span><MapPin size={14} /> {issue.evidence_location}</span>
-                    <span><Ruler size={14} /> Lines {issue.evidence_line_start}–{issue.evidence_line_end}</span>
+                    <span><Ruler size={14} /> {t("inspector.lines", { start: issue.evidence_line_start, end: issue.evidence_line_end })}</span>
                   </div>
                 </div>
               )}
               <div className="inspector-nav">
                 <button className="btn-sm outline" disabled={currentIdx <= 0} onClick={() => onNavigate?.(currentIdx - 1)}>
-                  <ChevronLeft size={14} /> Previous
+                  <ChevronLeft size={14} /> {t("inspector.previous")}
                 </button>
-                <span style={{ fontSize: ".75rem", color: "var(--text3)" }}>{currentIdx + 1} of {totalIssues}</span>
+                <span style={{ fontSize: ".75rem", color: "var(--text3)" }}>{t("inspector.position", { current: currentIdx + 1, total: totalIssues })}</span>
                 <button className="btn-sm outline" disabled={currentIdx >= totalIssues - 1} onClick={() => onNavigate?.(currentIdx + 1)}>
-                  Next <ChevronRight size={14} />
+                  {t("inspector.next")} <ChevronRight size={14} />
                 </button>
               </div>
             </div>
@@ -256,8 +253,8 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
                 <div className="inspector-scan-list">
                   {scanHistory.map((h, i) => (
                     <div key={i} className="scan-entry">
-                      <strong>Scan #{i + 1}</strong> — {h.status}
-                      <span style={{ color: "var(--text3)", marginLeft: 8 }}>{fmtDate(h.created_at)}</span>
+                      <strong>{t("inspector.scan_number", { number: i + 1 })}</strong> — {h.status}
+                      <span style={{ color: "var(--text3)", marginLeft: 8 }}>{fmtDate(h.created_at, i18n.language)}</span>
                     </div>
                   ))}
                 </div>
@@ -265,9 +262,9 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
                 <div className="chart-empty">{t("inspector.no_history")}</div>
               )}
               <div className="inspector-scan-summary">
-                <strong>Session: </strong>{session.filename}
-                <span style={{ marginLeft: 16 }}><strong>Profile: </strong>{session.profile_id}</span>
-                <span style={{ marginLeft: 16 }}><strong>Score: </strong>{session.score}</span>
+                <strong>{t("common.session")}: </strong>{session.filename}
+                <span style={{ marginLeft: 16 }}><strong>{t("common.profile")}: </strong>{session.profile_id}</span>
+                <span style={{ marginLeft: 16 }}><strong>{t("common.score")}: </strong>{session.score}</span>
               </div>
             </div>
           )}
@@ -275,16 +272,16 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
 
         {/* Footer */}
         <div className="inspector-footer">
-          <span className="issue-source">Rule: {issue.rule_id} · Source: {issue.source}</span>
-          <span className="issue-source">Issue ID: {issue.id}</span>
+          <span className="issue-source">{t("inspector.rule_id")}: {issue.rule_id} · {t("inspector.source")}: {issue.source}</span>
+          <span className="issue-source">{t("inspector.issue_id")}: {issue.id}</span>
         </div>
       </div>
     </div>
   );
 }
 
-function fmtDate(iso: string) {
+function fmtDate(iso: string, locale: string) {
   if (!iso) return "";
   const d = new Date(iso);
-  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }

@@ -1,6 +1,36 @@
 id: business
-name: Business Proposal
-categories: [structure, writing]
-weights: {structure: 40, writing: 60}
-permissions: {writing: 4, structure: 3}
-required_sections: [Executive Summary]
+name: Business Review
+description: "For proposals, reports, SOPs, business documents"
+version: "2.0.0"
+document_types:
+  - proposal
+  - business_report
+  - sop
+  - policy
+  - meeting_minutes
+categories: [structure, writing, formatting, compliance]
+weights:
+  structure: 25
+  writing: 25
+  formatting: 25
+  compliance: 25
+permissions:
+  writing: 3
+  formatting: 2
+  structure: 2
+  compliance: 1
+required_sections: [Executive Summary, Introduction, Conclusion]
+forbidden_sections: []
+rubric:
+  structure: "Clear business structure with executive summary"
+  writing: "Professional, concise, active voice"
+  formatting: "Corporate brand guidelines followed"
+  compliance: "No sensitive or non-compliant statements"
+ai_focus:
+  - brevity
+  - tone
+auto_fix_policy:
+  formatting: safe
+  structure: assisted
+  writing: ai
+  compliance: manual

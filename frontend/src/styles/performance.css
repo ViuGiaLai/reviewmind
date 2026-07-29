@@ -1,0 +1,38 @@
+.workspace-main {
+  scrollbar-gutter: stable;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.workspace-content { contain: layout style; }
+.page-stack { animation-duration: .2s; }
+.review-card, .history-card, .document-card, .reference-template-card,
+.evaluation-profile-card, .knowledge-pack-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 140px;
+  transition-property: transform, border-color, box-shadow, background-color;
+}
+.sidebar-item, .btn-primary, .btn-secondary, .btn-icon, .pack-card {
+  transition-property: transform, color, background-color, border-color, box-shadow, opacity;
+}
+.ai-messages, .inspector-content, .workspace-sidebar { overscroll-behavior: contain; }
+
+@media (max-width: 900px), (pointer: coarse) {
+  .card, .review-card, .history-card, .document-card, .reference-template-card,
+  .evaluation-profile-card, .knowledge-pack-card, .profile-card, .pack-card {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .page-stack, .empty-state, .wizard-card { animation: none !important; }
+}
+.page-loading {
+  min-height: min(420px, 55vh);
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  color: var(--text3);
+  font-size: .78rem;
+}

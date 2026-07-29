@@ -7,7 +7,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, Response
 
-from app.api.auth import get_current_user_id
+from app.api.auth import get_current_user_id, require_resource_owner
+from app.api.upload_utils import read_upload_limited
+from app.api.ai_context import build_verified_review_context
 from app.config import settings
 from app.database import create_database
 from app.storage import create_storage
@@ -52,12 +54,9 @@ async def upload_document(
             detail=f"Unsupported file type '{suffix}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
         )
 
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large. Maximum size is {MAX_FILE_SIZE // (1024*1024)} MB."
-        )
+    content = await read_upload_limited(
+        file, max_bytes=MAX_FILE_SIZE, chunk_size=settings.app.upload_chunk_size
+    )
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Empty file.")
 
@@ -109,14 +108,10 @@ def get_document(
     user_id: str | None = Depends(get_current_user_id),
 ) -> dict[str, Any]:
     """Get document detail with page info."""
-    doc = database.get_document(doc_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found.")
-    # Verify document belongs to current user
-    if user_id and doc.get("user_id") and doc["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Document does not belong to this user.")
+    doc = require_resource_owner(database.get_document(doc_id), user_id, "Document not found.")
+
     # Get associated sessions
-    sessions = database.get_sessions_for_document(doc_id)
+    sessions = database.get_sessions_for_document(doc_id, user_id=user_id)
     doc["sessions"] = sessions
     doc["session_count"] = len(sessions)
     return doc
@@ -128,12 +123,8 @@ def delete_document(
     user_id: str | None = Depends(get_current_user_id),
 ) -> dict[str, str]:
     """Delete a document and its storage file."""
-    doc = database.get_document(doc_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found.")
-    # Verify document belongs to current user
-    if user_id and doc.get("user_id") and doc["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Document does not belong to this user.")
+    doc = require_resource_owner(database.get_document(doc_id), user_id, "Document not found.")
+
     # Delete from storage
     try:
         storage.delete(doc.get("storage_path", ""))
@@ -154,12 +145,8 @@ def get_review_status(
     user_id: str | None = Depends(get_current_user_id),
 ) -> dict[str, Any]:
     """Get review status and pipeline progress."""
-    session = database.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Review session not found.")
-    # Verify session belongs to current user
-    if user_id and session.get("user_id") and session["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Session does not belong to this user.")
+    session = require_resource_owner(database.get_session(session_id), user_id, "Review session not found.")
+
     issues, _ = database.list_issues(session_id=session_id, limit=500)
     return {
         "id": session["id"],
@@ -207,10 +194,8 @@ def get_issue_evidence(
     evidence = database.get_issue_evidence(issue_id)
     if not evidence:
         raise HTTPException(status_code=404, detail="Issue not found.")
-    # Verify issue belongs to current user via session
-    session = database.get_session(evidence.get("session_id", ""))
-    if session and user_id and session.get("user_id") and session["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Issue does not belong to this user.")
+    require_resource_owner(database.get_session(evidence.get("session_id", "")), user_id, "Issue not found.")
+
     return {
         "issue_id": evidence["id"],
         "excerpt": evidence.get("evidence_excerpt", ""),
@@ -231,10 +216,8 @@ async def explain_issue(
     issue = database.get_issue(issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found.")
-    # Verify issue belongs to current user via session
-    session = database.get_session(issue.get("session_id", ""))
-    if session and user_id and session.get("user_id") and session["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Issue does not belong to this user.")
+    require_resource_owner(database.get_session(issue.get("session_id", "")), user_id, "Issue not found.")
+
     try:
         from dataclasses import dataclass
         from app.llm import AIReviewer
@@ -268,10 +251,10 @@ async def explain_issue(
     return {"issue_id": issue_id, "explanation": explanation}
 
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class AIChatBody(BaseModel):
-    message: str
+    message: str = Field(min_length=1, max_length=4000)
     session_id: str | None = None
     context: dict[str, Any] | None = None
 
@@ -283,34 +266,35 @@ async def ai_chat(
 ) -> dict[str, Any]:
     """AI Assistant Chat Endpoint for review analysis and guidance."""
     msg = body.message.strip()
-    # If session_id provided, verify ownership
+    session: dict[str, Any] | None = None
+    issues: list[dict[str, Any]] = []
     if body.session_id:
-        session = database.get_session(body.session_id)
-        if session and user_id and session.get("user_id") and session["user_id"] != user_id:
-            raise HTTPException(status_code=403, detail="Session does not belong to this user.")
-    if not msg:
-        raise HTTPException(status_code=400, detail="Empty message.")
+        session = require_resource_owner(
+            database.get_session(body.session_id), user_id, "Session not found."
+        )
+        issues, _ = database.list_issues(session_id=body.session_id, limit=12)
+
+    ctx_str = build_verified_review_context(session, issues)
 
     try:
         from app.llm import AIReviewer
         reviewer = AIReviewer()
-        ctx_str = ""
-        if body.context:
-            filename = body.context.get("filename", "document")
-            score = body.context.get("score", 0)
-            issues_cnt = len(body.context.get("issues", []))
-            ctx_str = f"[Context: Document '{filename}', Review Score: {score}/100, Issues: {issues_cnt}]\n"
-
-        reply = await reviewer.provider.generate(
-            prompt=f"System: You are ReviewMind AI Assistant, an expert document review assistant based on Rule-first + Knowledge Pack architecture. Be concise, professional, and directly address the user query.\n\n{ctx_str}User query: {msg}",
-            temperature=0.3,
-            max_tokens=1000,
-        )
-        return {"response": reply.strip()}
+        reply = await reviewer.answer_question(question=msg, document_context=ctx_str)
+        return {"response": reply.strip(), "grounded": bool(session)}
     except Exception:
-        ctx_info = f" for '{body.context.get('filename', 'your document')}' (Score: {body.context.get('score', 'N/A')}/100)" if body.context else ""
-        fallback = f"ReviewMind Assistant Analysis{ctx_info}:\n\nBased on your query '{msg}', the Rule Engine evaluated your document with high precision. Ensure all high-severity structural and citation rules are addressed before final publication."
-        return {"response": fallback}
+        if session:
+            fallback = (
+                f"ReviewMind Assistant — {session.get('filename', 'document')} "
+                f"({session.get('score', 0)}/100):\n\n"
+                "Prioritize open high-severity findings, then verify structural and citation issues "
+                "against their evidence before applying any content change."
+            )
+        else:
+            fallback = (
+                "Run or select a review first so the assistant can answer from verified findings. "
+                "General guidance is available, but it is not document-grounded."
+            )
+        return {"response": fallback, "grounded": bool(session)}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -326,11 +310,8 @@ def compare_history(
     """Compare two review sessions: score change, issue change, severity diff."""
     # Verify both sessions belong to current user
     for sid in (session_1, session_2):
-        s = database.get_session(sid)
-        if not s:
-            raise HTTPException(status_code=404, detail=f"Session '{sid[:8]}' not found.")
-        if user_id and s.get("user_id") and s["user_id"] != user_id:
-            raise HTTPException(status_code=403, detail=f"Session '{sid[:8]}' does not belong to this user.")
+        require_resource_owner(database.get_session(sid), user_id, f"Session '{sid[:8]}' not found.")
+
     result = database.compare_sessions(session_1, session_2)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])

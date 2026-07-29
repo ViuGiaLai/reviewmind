@@ -8,9 +8,12 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.auth import get_current_user_id
+from app.api.auth import get_current_user_id, require_resource_owner
 from app.database import create_database
 from app.review.autofix import Suggestion, SuggestionEngine
+from app.review.autofix.transaction import text_hash
+from app.security import audit_log
+from app.operations import metrics
 
 router = APIRouter(prefix="/api/sessions/{session_id}/autofix", tags=["autofix"])
 engine = SuggestionEngine()
@@ -20,13 +23,8 @@ database = create_database()
 # ─── Helper ────────────────────────────────────────────────────────────────────
 
 def _get_session(session_id: str, user_id: str | None = None) -> dict[str, Any]:
-    session = database.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
-    # Verify session belongs to current user
-    if user_id and session.get("user_id") and session["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Session does not belong to this user.")
-    return session
+    return require_resource_owner(database.get_session(session_id), user_id, "Session not found.")
+
 
 
 def _get_issues(session_id: str) -> list[dict[str, Any]]:
@@ -59,9 +57,7 @@ def _get_document_text(session: dict[str, Any]) -> str | None:
     doc_id = session.get("document_id")
     if not doc_id:
         return None
-    doc = database.get_document(doc_id)
-    if not doc:
-        return None
+    doc = require_resource_owner(database.get_document(doc_id), session.get("user_id"), "Document not found.")
     try:
         from app.storage import create_storage
         storage = create_storage()
@@ -76,6 +72,17 @@ def _get_document_text(session: dict[str, Any]) -> str | None:
         return None
     return None
 
+
+def _get_current_document_text(session: dict[str, Any]) -> str | None:
+    """Return the latest snapshot, falling back to the immutable source document."""
+    history = database.get_autofix_history(session["id"])
+    if history:
+        latest = history[0]
+        if latest.get("reverted_at") and latest.get("reverted_document"):
+            return latest["reverted_document"]
+        if latest.get("patched_document"):
+            return latest["patched_document"]
+    return _get_document_text(session)
 
 def _import_issues_as_objects(issues: list[dict[str, Any]]) -> list[Any]:
     """Convert dict issues to lightweight named-tuple-like objects for the suggestion engine."""
@@ -130,6 +137,26 @@ def _import_issues_as_objects(issues: list[dict[str, Any]]) -> list[Any]:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. GENERATE SUGGESTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/plan")
+def get_fix_plan(
+    session_id: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    """Build a categorized plan before any change can be applied."""
+    response = list_suggestions(session_id, user_id)
+    suggestions = [Suggestion(**item) for item in response["items"]]
+    plan = engine.planner.create_plan(suggestions)
+    return {
+        "session_id": session_id,
+        "total": plan.total_issues,
+        "safe": plan.safe_fixes,
+        "confirmation_required": plan.need_confirmation,
+        "manual": plan.manual_only,
+        "estimated_seconds": plan.estimated_time_seconds,
+        "estimated_success_rate": plan.estimated_success_rate,
+        "grouped_by_category": plan.grouped_by_category,
+    }
 
 @router.get("/suggestions")
 def list_suggestions(
@@ -226,11 +253,12 @@ def apply_suggestion(
         line_end=target["line_end"],
         confidence=target["confidence"],
         category=target["category"],
+        fix_type=target["fix_type"],
     )
 
     # Get text and apply
     session = _get_session(session_id, user_id)
-    text = _get_document_text(session) or ""
+    text = _get_current_document_text(session) or ""
     if not text:
         raise HTTPException(status_code=400, detail="No source document text available for autofix.")
 
@@ -252,11 +280,20 @@ def apply_suggestion(
         patched_document=result.patched_text,
     )
 
+    metrics.increment("reviewmind_autofix_total", outcome="success", mode="single")
+    audit_log.record(
+        actor_id=user_id or "anonymous", action="autofix.apply",
+        resource_type="session", resource_id=session_id,
+        metadata={"suggestion_id": suggestion_id, "rule_id": suggestion.rule_id},
+    )
+
     return {
         "action_id": action_id,
         "suggestion_id": suggestion_id,
         "status": "applied",
         "changes": result.changes,
+        "document_hash": text_hash(result.patched_text),
+        "verification": "passed",
     }
 
 
@@ -279,6 +316,12 @@ def revert_suggestion(
     if not target:
         raise HTTPException(status_code=404, detail="Applied suggestion not found or already reverted.")
 
+    if existing and existing[0]["suggestion_id"] != suggestion_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Undo must follow reverse application order to preserve version history.",
+        )
+
     # Reconstruct suggestion
     suggestion = Suggestion(
         id=target["suggestion_id"],
@@ -296,7 +339,7 @@ def revert_suggestion(
         applied_at=target.get("applied_at"),
     )
 
-    text = _get_document_text(session) or ""
+    text = _get_current_document_text(session) or ""
     if not text:
         # Try to use the patched document stored in DB
         text = target.get("patched_document", "")
@@ -309,6 +352,11 @@ def revert_suggestion(
 
     # Update database
     database.revert_autofix_action(target["id"], result.patched_text)
+    audit_log.record(
+        actor_id=user_id or "anonymous", action="autofix.revert",
+        resource_type="session", resource_id=session_id,
+        metadata={"suggestion_id": suggestion_id},
+    )
 
     return {
         "action_id": target["id"],
@@ -347,12 +395,13 @@ def apply_suggestions_bulk(
             line_end=t["line_end"],
             confidence=t["confidence"],
             category=t["category"],
+            fix_type=t["fix_type"],
         )
         for t in targets
     ]
 
     session = _get_session(session_id, user_id)
-    text = _get_document_text(session) or ""
+    text = _get_current_document_text(session) or ""
     if not text:
         raise HTTPException(status_code=400, detail="No source document text available for autofix.")
 
@@ -373,11 +422,21 @@ def apply_suggestions_bulk(
             patched_document=patched_text,
         )
 
+    metrics.increment("reviewmind_autofix_total", value=len(applied), outcome="success", mode="bulk")
+    metrics.increment("reviewmind_autofix_total", value=sum(1 for result in results if not result.success), outcome="failure", mode="bulk")
+    audit_log.record(
+        actor_id=user_id or "anonymous", action="autofix.apply_bulk",
+        resource_type="session", resource_id=session_id,
+        metadata={"applied_count": len(applied)},
+    )
+
     return {
         "session_id": session_id,
         "applied": len(applied),
         "failed": sum(1 for r in results if not r.success),
         "errors": [r.error for r in results if not r.success],
+        "document_hash": text_hash(patched_text),
+        "verification": "passed" if applied else "no_changes",
     }
 
 

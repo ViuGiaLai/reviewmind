@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import settings
+from ..operations import metrics
 from .models import ReviewRequest, ReviewResult
 from .packs import PackLoader
 from .parser import FileParser
@@ -14,6 +15,8 @@ from .report import render_markdown
 from .rule_engine import RulePipeline
 from .scoring import ScoreEngine
 from .scheduler import AIReviewScheduler
+from .document_type import DocumentTypeDetector
+from .reference_templates import ReferenceTemplateEngine
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +50,27 @@ class ReviewEngine:
         import time
         start_time = time.perf_counter()
 
-        document = self.parser.parse_text(request.text, request.filename, request.content_type)
-        detected_profile_id = self.profiles.detect_profile_from_text(request.text)
+        document = (
+            self.parser.parse(request.source_content, request.filename, request.content_type)
+            if request.source_content is not None
+            else self.parser.parse_text(request.text, request.filename, request.content_type)
+        )
+
+        # Extract headings for document type detection
+        headings = [h[1] for h in document.headings]
+        detection = DocumentTypeDetector().detect(
+            text=request.text,
+            filename=request.filename,
+            headings=headings,
+        )
+        detected_profile_id = detection.profile_id
         resolved_profile_id = request.profile_id if request.profile_id != "auto" else detected_profile_id
         profile = self.profiles.load(resolved_profile_id)
+        if request.profile_overrides:
+            from dataclasses import replace
+            allowed = {"id", "name", "categories", "weights"}
+            overrides = {key: value for key, value in request.profile_overrides.items() if key in allowed}
+            profile = replace(profile, **overrides)
         categories = set(request.enabled_categories or profile.categories) & set(profile.categories)
 
         # Merge profile permissions with pack overrides
@@ -59,6 +79,7 @@ class ReviewEngine:
         )
         # Apply pack config overrides
         pack_config = self.packs.get_pack_config(request.pack_ids)
+        pack_ai_context = self.packs.get_ai_context(request.pack_ids)
 
         # Create a patched profile with merged permissions so rules can use them
         from dataclasses import replace
@@ -73,32 +94,40 @@ class ReviewEngine:
             pack_ids=request.pack_ids,
             config_overrides=pack_config,
         )
+        if request.reference_template:
+            issues.extend(ReferenceTemplateEngine().compare(document, request.reference_template))
+
         rule_duration_ms = (time.perf_counter() - rule_start_time) * 1000
 
         # ── AI Review Integration ────────────────────────────────────────────
         ai_review_enabled = False
         ai_review_reason = "AI review not evaluated."
 
-        if self.enable_ai:
+        if request.review_mode == "rule_only":
+            ai_review_reason = "AI disabled by rules-only review mode."
+        elif self.enable_ai:
             try:
                 decision = self.scheduler.decide(
                     document_text=request.text,
-                    profile=profile,
+                    profile=patched_profile,
                     issues=issues,
                     categories=categories,
                     pack_config=pack_config,
                 )
-                ai_review_enabled = decision.should_run
-                ai_review_reason = decision.reason
+                should_run_ai = request.review_mode == "full" or decision.should_run
+                ai_review_enabled = should_run_ai
+                ai_review_reason = "Deep AI review requested." if request.review_mode == "full" else decision.reason
 
-                if decision.should_run:
+                if should_run_ai:
                     ai_reviewer = self._get_ai_reviewer()
                     if ai_reviewer:
                         ai_issues = await ai_reviewer.analyze_document(
                             document_text=request.text,
-                            profile=profile,
+                            profile=patched_profile,
                             existing_issues=issues,
-                            pack_info=pack_config,
+                            pack_info=pack_ai_context,
+                            document_type=detection.document_type.value,
+                            focus=decision.evaluation_types,
                         )
                         if ai_issues:
                             logger.info(f"AI review found {len(ai_issues)} additional issues")
@@ -113,8 +142,13 @@ class ReviewEngine:
                 ai_review_enabled = False
                 ai_review_reason = f"AI review error: {e}"
 
-        score, category_scores = self.scoring.score(issues, profile)
+        score, category_scores = self.scoring.score(issues, profile, request.scoring_mode)
         total_duration_ms = (time.perf_counter() - start_time) * 1000
+        metrics.increment("reviewmind_reviews_total", profile=profile.id)
+        metrics.observe(
+            "reviewmind_review_duration_seconds", total_duration_ms / 1000,
+            profile=profile.id,
+        )
 
         # ── Compute Rich Metadata ─────────────────────────────────────────────
         from .models import BlockType
@@ -150,10 +184,23 @@ class ReviewEngine:
             "parser": {"status": "completed", "label": f"{document.content_type or 'Text'} Parsed"},
             "profile": {"status": "completed", "label": profile.name},
             "knowledge_pack": {"status": "completed", "label": f"{len(request.pack_ids)} Pack(s)" if request.pack_ids else "Base Pack"},
+            "reference_template": {
+                "status": "completed" if request.reference_template else "skipped",
+                "label": "Reference template checked" if request.reference_template else "No reference template",
+            },
             "rule_engine": {"status": "completed", "label": f"{rules_loaded_count} Rules Executed"},
             "ai_scheduler": {"status": "completed" if ai_review_enabled else "skipped", "label": ai_review_reason},
             "autofix": {"status": "ready" if autofix_count > 0 else "none", "label": f"{autofix_count} Fixes Available"},
         }
+
+        # Get readiness level from insights engine
+        try:
+            from .report.insights import InsightsEngine
+            insights_engine = InsightsEngine()
+            report = insights_engine.generate_report(issues, score, category_scores, profile)
+            readiness = report.readiness_level
+        except Exception:
+            readiness = ""
 
         return ReviewResult(
             profile_id=profile.id,
@@ -162,7 +209,15 @@ class ReviewEngine:
             score=score,
             category_scores=category_scores,
             summary=f"Found {len(issues)} issue(s) across {len(categories)} enabled category/categories.",
-            report_markdown=render_markdown(profile.id, score, issues),
+            report_markdown=render_markdown(
+                profile_id=profile.id,
+                score=score,
+                issues=issues,
+                category_scores=category_scores,
+                doc_stats=doc_stats,
+                readiness_level=readiness,
+                language=request.report_language,
+            ),
             ai_review_enabled=ai_review_enabled,
             ai_review_reason=ai_review_reason,
             duration_ms=round(total_duration_ms, 2),

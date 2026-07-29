@@ -1,0 +1,88 @@
+/* ═══════════════════════════════════════════════════════════════════════════════
+   BADGES & TAGS
+   ═══════════════════════════════════════════════════════════════════════════════ */
+.badge {
+  padding: 3px 12px; border-radius: var(--radius-full);
+  font-size: .75rem; font-weight: 600;
+  display: inline-flex; align-items: center;
+}
+.badge.completed { background: var(--success-glow); color: var(--success); }
+.badge.failed { background: var(--danger-glow); color: var(--danger); }
+.badge.pending { background: var(--warning-glow); color: var(--warning); }
+
+.sev-badge, .cat-badge, .rule-badge, .conf-badge, .status-badge, .fix-badge {
+  display: inline-flex; align-items: center; padding: 2px 12px;
+  border-radius: var(--radius-full);
+  font-size: .75rem; font-weight: 600; line-height: 1.6;
+}
+.sev-badge.high { background: var(--danger-glow); color: var(--danger); }
+.sev-badge.medium { background: var(--warning-glow); color: var(--warning); }
+.sev-badge.low { background: rgba(59,130,246,0.12); color: var(--info); }
+.cat-badge { background: var(--primary-glow-soft); color: var(--primary); }
+.rule-badge { background: var(--surface4); color: var(--text3); font-family: var(--mono); }
+.conf-badge { background: var(--success-glow); color: var(--success); }
+.status-badge.open { background: var(--warning-glow); color: var(--warning); }
+.status-badge.resolved { background: var(--success-glow); color: var(--success); }
+.status-badge.ignored { background: var(--surface4); color: var(--text3); }
+
+.chip {
+  display: inline-flex; align-items: center; padding: 3px 14px;
+  border-radius: var(--radius-full); font-size: .7rem; font-weight: 500;
+  background: var(--surface4); color: var(--text2);
+}
+.chip.primary { background: var(--primary-glow); color: var(--primary); }
+.chip-group { display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   PROFILE & PACK CARDS
+   ═══════════════════════════════════════════════════════════════════════════════ */
+.profile-cards { display: flex; flex-direction: column; gap: 12px; }
+.profile-card {
+  display: flex; align-items: center; gap: 20px;
+  padding: 20px; border-radius: var(--radius);
+  border: 1px solid var(--glass-border); cursor: pointer;
+  transition: all var(--transition); position: relative;
+  background: var(--glass); backdrop-filter: blur(8px);
+}
+.profile-card:hover { border-color: var(--primary-light); box-shadow: var(--shadow); transform: translateY(-2px); }
+.profile-card.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-glow), var(--shadow);
+}
+.profile-card-icon {
+  width: 48px; height: 48px; display: flex; align-items: center;
+  justify-content: center; background: var(--surface3);
+  border-radius: var(--radius); flex-shrink: 0; color: var(--text2);
+}
+.profile-card.selected .profile-card-icon { background: var(--primary-gradient); color: white; }
+.profile-card-body { flex: 1; min-width: 0; }
+.profile-card-body strong { font-size: .9rem; display: block; margin-bottom: 3px; }
+.profile-card-body p { margin: 0; }
+
+.pack-cards { display: flex; flex-direction: column; gap: 8px; }
+.pack-card {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px; border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border); background: var(--glass);
+  cursor: pointer; transition: all var(--transition); backdrop-filter: blur(8px);
+}
+.pack-card:hover { border-color: var(--border2); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+.pack-card.selected { border-color: var(--primary); background: var(--primary-glow-soft); }
+.pack-card-icon { flex-shrink: 0; color: var(--text3); }
+.pack-card-body { flex: 1; min-width: 0; }
+.pack-card-body strong { font-size: .82rem; }
+.pack-card-body p { font-size: .75rem; color: var(--text3); margin: 0; }
+.pack-toggle {
+  width: 38px; height: 22px; border-radius: var(--radius-full);
+  background: var(--border2); position: relative; transition: var(--transition);
+  flex-shrink: 0;
+}
+.pack-toggle.checked { background: var(--primary); }
+.pack-toggle-dot {
+  position: absolute; top: 2px; left: 2px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: white; transition: var(--transition);
+  box-shadow: var(--shadow-xs);
+}
+.pack-toggle.checked .pack-toggle-dot { left: 18px; }
+

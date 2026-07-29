@@ -1,0 +1,42 @@
+/* ═══════════════════════════════════════════════════════════════════════════════
+   REVIEWS GRID
+   ═══════════════════════════════════════════════════════════════════════════════ */
+.reviews-grid { display: flex; flex-direction: column; gap: 12px; }
+.review-card {
+  padding: 20px; border-radius: var(--radius);
+  border: 1px solid var(--glass-border); background: var(--glass);
+  cursor: pointer; transition: all var(--transition);
+  backdrop-filter: blur(12px);
+}
+.review-card:hover { border-color: var(--primary-light); box-shadow: var(--shadow); transform: translateY(-2px); }
+.rc-header { display: flex; align-items: center; gap: 16px; }
+.rc-info { flex: 1; min-width: 0; }
+.rc-name { font-size: .9rem; display: block; margin-bottom: 4px; font-weight: 600; }
+.rc-meta { display: flex; gap: 12px;  font-size: .8rem; color: var(--text3); }
+.rc-score {
+  font-size: 1.6rem; font-weight: 800; letter-spacing: -0.02em;
+}
+.rc-summary {
+  font-size: .82rem; color: var(--text2);
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   HISTORY
+   ═══════════════════════════════════════════════════════════════════════════════ */
+.history-list { display: flex; flex-direction: column; gap: 12px; }
+.history-card {
+  display: flex; gap: 16px; padding: 20px;
+  border-radius: var(--radius); cursor: pointer;
+  border: 1px solid var(--glass-border); background: var(--glass);
+  transition: all var(--transition); backdrop-filter: blur(12px);
+}
+.history-card:hover { border-color: var(--border); box-shadow: var(--shadow); transform: translateY(-2px); }
+.hc-left { flex-shrink: 0; }
+.hc-body { flex: 1; min-width: 0; }
+.hc-title { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.hc-title strong { font-size: .9rem; }
+.hc-meta { display: flex; gap: 12px;  font-size: .8rem; color: var(--text3); margin-bottom: 4px; }
+.hc-summary { font-size: .78rem; color: var(--text2); }
+.hc-actions { display: flex; gap: 4px; align-items: flex-start; }
+

@@ -1,6 +1,35 @@
 id: sop
 name: SOP & Compliance
-categories: [structure, writing, compliance]
-weights: {structure: 30, writing: 20, compliance: 50}
-permissions: {writing: 2, structure: 4, compliance: 1}
-required_sections: [Purpose, Procedure, Revision History]
+description: "For standard operating procedures, ISO documents"
+version: "2.0.0"
+document_types:
+  - sop
+  - iso_document
+  - process_document
+  - policy
+categories: [structure, writing, formatting, compliance]
+weights:
+  structure: 30
+  writing: 20
+  formatting: 20
+  compliance: 30
+permissions:
+  writing: 2
+  formatting: 3
+  structure: 3
+  compliance: 1
+required_sections: [Purpose, Scope, Procedure]
+forbidden_sections: []
+rubric:
+  structure: "Standardized sections: Purpose, Scope, Procedure"
+  writing: "Direct, unambiguous instructions"
+  formatting: "Numbered steps and clear hierarchy"
+  compliance: "Strict adherence to regulatory requirements"
+ai_focus:
+  - unambiguity
+  - compliance
+auto_fix_policy:
+  formatting: safe
+  structure: assisted
+  writing: manual
+  compliance: manual

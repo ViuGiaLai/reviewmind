@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { HistoryItem, SessionDetail } from "../main";
+import { HistoryItem, SessionDetail } from "../domain/types";
 import { TrendingUp, FolderOpen, Calendar, ArrowUp, ArrowDown, Clock } from "lucide-react";
 
 /* ═══════════════════════════════════════════════════════════════════════════════

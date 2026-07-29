@@ -1,0 +1,34 @@
+id: research
+name: Research Document
+description: "For research proposals, literature reviews"
+version: "2.0.0"
+document_types:
+  - research_proposal
+  - literature_review
+  - survey_paper
+categories: [structure, writing, citation, logic]
+weights:
+  structure: 25
+  writing: 25
+  citation: 30
+  logic: 20
+permissions:
+  writing: 3
+  citation: 1
+  structure: 2
+  logic: 1
+required_sections: [Abstract, Introduction, Literature Review, Methodology, References]
+forbidden_sections: []
+rubric:
+  structure: "Follows standard research format"
+  writing: "Objective, academic tone"
+  citation: "Rigorous citation of prior work"
+  logic: "Sound methodology and valid conclusions"
+ai_focus:
+  - logic
+  - methodology
+auto_fix_policy:
+  formatting: safe
+  structure: assisted
+  citation: manual
+  writing: ai

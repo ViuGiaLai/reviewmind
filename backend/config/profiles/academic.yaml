@@ -1,6 +1,37 @@
 id: academic
 name: Academic Review
-categories: [structure, writing, citation]
-weights: {structure: 35, writing: 30, citation: 35}
-permissions: {writing: 3, citation: 1, structure: 2}
-required_sections: [Introduction, References]
+description: "For academic papers, theses, and research documents"
+version: "2.0.0"
+document_types:
+  - thesis
+  - journal_article
+  - conference_paper
+  - internship_report
+  - dissertation
+categories: [structure, writing, citation, formatting]
+weights:
+  structure: 30
+  writing: 25
+  citation: 30
+  formatting: 15
+permissions:
+  writing: 3
+  citation: 1
+  structure: 2
+  formatting: 2
+required_sections: [Introduction, Methodology, Results, Conclusion, References]
+forbidden_sections: []
+rubric:
+  structure: "Document follows standard academic structure with all required sections"
+  writing: "Clear, coherent academic writing with proper argumentation"
+  citation: "All citations properly formatted and references complete"
+  formatting: "Consistent formatting throughout the document"
+ai_focus:
+  - argument_quality
+  - coherence
+  - clarity
+auto_fix_policy:
+  formatting: safe
+  structure: assisted
+  citation: manual
+  writing: ai

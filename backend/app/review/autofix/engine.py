@@ -10,6 +10,7 @@ from .diff_engine import DiffEngine
 from .fix_confidence import FixConfidenceCalculator
 from .planner import FixPlanner
 from .safe_rules import SafeFixRules
+from .transaction import AutoFixTransactionEngine, stable_suggestion_id
 
 
 class SuggestionEngine:
@@ -20,6 +21,7 @@ class SuggestionEngine:
         self.confidence_calculator = FixConfidenceCalculator()
         self.planner = FixPlanner()
         self.safe_rules = SafeFixRules()
+        self.transaction = AutoFixTransactionEngine()
 
     def generate_suggestions(
         self,
@@ -87,34 +89,36 @@ class SuggestionEngine:
                 category=category,
                 fix_type=self._determine_fix_type(rule_id, category),
             )
+            suggestion.id = stable_suggestion_id(session_id, suggestion)
             suggestions.append(suggestion)
 
         return suggestions
 
     def _generate_fix(self, text: str, rule_id: str, category: str) -> str | None:
         """Generate a fix for a specific rule."""
+        normalized_rule_id = rule_id.casefold().replace("_", "-").rsplit(".", 1)[-1]
         # Safe format fixes
-        if rule_id == "heading-numbering":
+        if normalized_rule_id == "heading-numbering":
             return SafeFixRules.fix_heading_style(text)
-        elif rule_id == "line-spacing":
+        elif normalized_rule_id == "line-spacing":
             return SafeFixRules.fix_line_spacing(text)
-        elif rule_id == "reference-formatting" or "reference" in rule_id.lower():
+        elif normalized_rule_id == "reference-formatting" or "reference" in normalized_rule_id:
             return SafeFixRules.fix_reference_formatting(text)
-        elif rule_id == "broken-hyperlinks" or "url" in rule_id.lower():
+        elif normalized_rule_id == "broken-hyperlinks" or "url" in normalized_rule_id:
             return SafeFixRules.fix_http_prefix(text)
-        elif rule_id == "bullet-list":
+        elif normalized_rule_id == "bullet-list":
             return SafeFixRules.fix_bullet_consistency(text)
-        elif rule_id == "punctuation" or rule_id == "period-spacing":
+        elif normalized_rule_id in {"punctuation", "period-spacing"}:
             return SafeFixRules.fix_period_spacing(text)
-        elif "citation-order" in rule_id.lower():
+        elif "citation-order" in normalized_rule_id:
             return SafeFixRules.fix_citation_order(text)
 
         # Category-based generic fixes
-        if category == "grammar" or rule_id == "spelling":
+        if category == "grammar" or normalized_rule_id == "spelling":
             return self._fix_spelling(text)
-        elif category == "writing" and "passive" in rule_id.lower():
+        elif category == "writing" and "passive" in normalized_rule_id:
             return self._fix_passive_voice(text)
-        elif category == "writing" and "hedging" in rule_id.lower():
+        elif category == "writing" and "hedging" in normalized_rule_id:
             return self._fix_hedging(text)
         elif category == "format":
             return SafeFixRules.fix_period_spacing(text)
@@ -186,6 +190,7 @@ class SuggestionEngine:
 
     def _determine_fix_type(self, rule_id: str, category: str) -> str:
         """Determine whether a fix is safe, AI, or manual."""
+        normalized_rule_id = rule_id.casefold().replace("_", "-").rsplit(".", 1)[-1]
         safe_rules = {
             "heading-numbering", "heading-hierarchy", "font-size", "line-spacing",
             "paragraph-spacing", "margin", "page-number", "header", "footer",
@@ -198,9 +203,9 @@ class SuggestionEngine:
             "weak-wording", "hedging", "repetition",
             "tone-consistency", "readability",
         }
-        if rule_id in safe_rules:
+        if normalized_rule_id in safe_rules:
             return "safe"
-        elif rule_id in ai_rules:
+        elif normalized_rule_id in ai_rules:
             return "ai"
         else:
             return "manual"
@@ -209,76 +214,43 @@ class SuggestionEngine:
         """Generate a diff between original and suggested text."""
         return self.diff_engine.line_diff(original, suggested)
 
+    def preview_suggestion(self, text: str, suggestion: Suggestion):
+        """Generate the mandatory before/after preview without mutating state."""
+        return self.transaction.preview(text, suggestion)
+
     def apply_suggestion(self, text: str, suggestion: Suggestion) -> FixApplyResult:
-        """Apply a single suggestion to the document text."""
-        if suggestion.applied:
-            return FixApplyResult(success=False, error="Suggestion already applied.")
-
-        lines = text.split("\n")
-        start = max(0, suggestion.line_start - 1)
-        end = min(len(lines), suggestion.line_end)
-
-        if start >= len(lines):
-            return FixApplyResult(success=False, error="Line range out of bounds.")
-
-        # Replace the specified line range with the suggested text
-        suggested_lines = suggestion.suggested_text.split("\n")
-        patched_lines = lines[:start] + suggested_lines + lines[end:]
-        patched_text = "\n".join(patched_lines)
-
-        return FixApplyResult(
-            success=True,
-            patched_text=patched_text,
-            changes=1 + sum(1 for a, b in zip(suggested_lines, lines[start:end]) if a != b),
-        )
-
+        """Apply one exact, verified replacement."""
+        return self.transaction.apply(text, suggestion)
     def revert_suggestion(self, text: str, suggestion: Suggestion) -> FixApplyResult:
-        """Revert a previously applied suggestion."""
-        if not suggestion.applied:
-            return FixApplyResult(success=False, error="Suggestion has not been applied.")
-
-        lines = text.split("\n")
-        start = max(0, suggestion.line_start - 1)
-        end = min(len(lines), suggestion.line_end + suggestion.suggested_text.count("\n"))
-
-        if start >= len(lines):
-            return FixApplyResult(success=False, error="Line range out of bounds for revert.")
-
-        # Replace with original text
-        original_lines = suggestion.original_text.split("\n")
-        patched_lines = lines[:start] + original_lines + lines[start + len(original_lines):]
-        patched_text = "\n".join(patched_lines)
-
-        return FixApplyResult(
-            success=True,
-            patched_text=patched_text,
-            changes=1,
-        )
-
+        """Undo one exact replacement."""
+        return self.transaction.revert(text, suggestion)
     def apply_suggestions_bulk(
         self,
         text: str,
         suggestions: list[Suggestion],
     ) -> tuple[str, list[Suggestion], list[FixApplyResult]]:
-        """Apply multiple suggestions in sequence."""
+        """Resolve overlaps, then apply a safe location-descending batch."""
         patched_text = text
         applied: list[Suggestion] = []
         results: list[FixApplyResult] = []
+        accepted, conflicts = self.transaction.resolve_conflicts(suggestions)
+        blocked = {conflict.blocked_id: conflict for conflict in conflicts}
 
         for suggestion in suggestions:
-            if suggestion.applied:
-                results.append(FixApplyResult(success=False, error="Already applied"))
-                continue
+            if suggestion.id in blocked:
+                results.append(FixApplyResult(
+                    success=False,
+                    error=f"Conflict: {blocked[suggestion.id].reason}",
+                ))
 
+        for suggestion in accepted:
             result = self.apply_suggestion(patched_text, suggestion)
             if result.success:
                 patched_text = result.patched_text
                 suggestion.applied = True
                 applied.append(suggestion)
             results.append(result)
-
         return patched_text, applied, results
-
     def create_change_summary(self, suggestions: list[Suggestion]) -> ChangeSummary:
         """Create a summary of changes from suggestions."""
         summary = ChangeSummary()

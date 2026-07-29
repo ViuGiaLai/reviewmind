@@ -4,6 +4,7 @@ from .diff_engine import DiffEngine
 from .fix_confidence import FixConfidenceCalculator
 from .planner import FixPlanner
 from .safe_rules import SafeFixRules
+from .transaction import AutoFixTransactionEngine, FixPreview, VerificationResult
 
 __all__ = [
     "Suggestion", "SuggestionEngine", "FixApplyResult",
@@ -11,4 +12,5 @@ __all__ = [
     "FixConfidence", "FixConfidenceCalculator",
     "FixPlan", "FixPlanner",
     "ChangeSummary", "SafeFixRules",
+    "AutoFixTransactionEngine", "FixPreview", "VerificationResult",
 ]

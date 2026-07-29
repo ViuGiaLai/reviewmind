@@ -48,6 +48,39 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def delete_document(self, doc_id: str) -> bool: ...
 
+    @abstractmethod
+    def save_reference_template(
+        self, original_name: str, size: int, storage_path: str,
+        analysis: dict[str, Any], user_id: str | None = None,
+    ) -> str: ...
+
+    @abstractmethod
+    def get_reference_template(self, template_id: str) -> dict[str, Any] | None: ...
+
+    @abstractmethod
+    def list_reference_templates(self, user_id: str | None = None) -> list[dict[str, Any]]: ...
+
+    @abstractmethod
+    def delete_reference_template(self, template_id: str) -> bool: ...
+
+    # Evaluation Profiles
+
+    @abstractmethod
+    def create_evaluation_profile(self, user_id: str, data: dict[str, Any]) -> str: ...
+
+    @abstractmethod
+    def get_evaluation_profile(self, profile_id: str) -> dict[str, Any] | None: ...
+
+    @abstractmethod
+    def list_evaluation_profiles(self, user_id: str) -> list[dict[str, Any]]: ...
+
+    @abstractmethod
+    def update_evaluation_profile(
+        self, profile_id: str, user_id: str, data: dict[str, Any]
+    ) -> bool: ...
+
+    @abstractmethod
+    def delete_evaluation_profile(self, profile_id: str, user_id: str) -> bool: ...
     # ── Review Sessions ──────────────────────────────────────────────────
 
     @abstractmethod
@@ -60,6 +93,7 @@ class DatabaseBackend(ABC):
         result: ReviewResult,
         document_id: str | None = None,
         user_id: str | None = None,
+        reference_template_id: str | None = None,
     ) -> str: ...
 
     @abstractmethod
@@ -107,10 +141,10 @@ class DatabaseBackend(ABC):
     def bulk_update_issue_status(self, session_id: str, status: str, category: str | None = None) -> int: ...
 
     @abstractmethod
-    def get_issue_history(self, issue_id_pattern: str, session_id: str) -> list[dict[str, Any]]: ...
+    def get_issue_history(self, issue_id_pattern: str, session_id: str, user_id: str | None = None) -> list[dict[str, Any]]: ...
 
     @abstractmethod
-    def get_sessions_for_document(self, document_id: str) -> list[dict[str, Any]]: ...
+    def get_sessions_for_document(self, document_id: str, user_id: str | None = None) -> list[dict[str, Any]]: ...
 
     # ── Global Issues ────────────────────────────────────────────────────
 
@@ -209,10 +243,41 @@ CREATE TABLE IF NOT EXISTS documents (
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS reference_templates (
+    id              TEXT PRIMARY KEY,
+    user_id         TEXT REFERENCES users(id) ON DELETE CASCADE,
+    original_name   TEXT NOT NULL,
+    size            INTEGER NOT NULL DEFAULT 0,
+    storage_path    TEXT NOT NULL DEFAULT '',
+    analysis        TEXT NOT NULL DEFAULT '{}',
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS evaluation_profiles (
+    id                    TEXT PRIMARY KEY,
+    user_id               TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name                  TEXT NOT NULL,
+    description           TEXT NOT NULL DEFAULT '',
+    base_profile_id       TEXT NOT NULL DEFAULT 'academic',
+    document_types        TEXT NOT NULL DEFAULT '[]',
+    knowledge_pack_ids    TEXT NOT NULL DEFAULT '[]',
+    reference_template_id TEXT REFERENCES reference_templates(id) ON DELETE SET NULL,
+    enabled_categories    TEXT NOT NULL DEFAULT '[]',
+    ai_review_enabled     INTEGER NOT NULL DEFAULT 1,
+    auto_fix_enabled      INTEGER NOT NULL DEFAULT 0,
+    scoring_profile       TEXT NOT NULL DEFAULT 'standard',
+    language              TEXT NOT NULL DEFAULT 'vi',
+    review_mode           TEXT NOT NULL DEFAULT 'standard',
+    visibility            TEXT NOT NULL DEFAULT 'private',
+    created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS review_sessions (
     id              TEXT PRIMARY KEY,
     user_id         TEXT REFERENCES users(id) ON DELETE CASCADE,
     document_id     TEXT REFERENCES documents(id) ON DELETE SET NULL,
+    reference_template_id TEXT REFERENCES reference_templates(id) ON DELETE SET NULL,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     filename        TEXT NOT NULL,
     profile_id      TEXT NOT NULL,
@@ -271,7 +336,15 @@ CREATE INDEX IF NOT EXISTS idx_autofix_suggestion ON autofix_actions(suggestion_
 CREATE INDEX IF NOT EXISTS idx_issues_session ON issues(session_id);
 CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_document ON review_sessions(document_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_template ON review_sessions(reference_template_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_created ON review_sessions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reference_templates_user ON reference_templates(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_evaluation_profiles_user ON evaluation_profiles(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_documents_user_created ON documents(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_created ON review_sessions(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_profile_created ON review_sessions(user_id, profile_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_issues_session_status_severity ON issues(session_id, status, severity);
+CREATE INDEX IF NOT EXISTS idx_issues_session_rule ON issues(session_id, rule_id);
 """
 
 # Combined for backward compat

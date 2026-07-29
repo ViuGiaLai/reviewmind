@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Issue, SessionDetail } from "../main";
+import { Issue, SessionDetail } from "../domain/types";
 import { Lightbulb, Star, ThumbsUp, Wrench, CircleX, ClipboardList, Target, AlertTriangle, Zap } from "lucide-react";
 
 /* ═══════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,42 @@
+.brand-logo {
+  --brand-logo-width: 154px;
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: var(--brand-logo-width);
+  line-height: 0;
+  vertical-align: middle;
+}
+
+.brand-logo--mark { --brand-logo-width: 42px; }
+
+.brand-logo__pair,
+.brand-logo__image {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: auto;
+}
+
+.brand-logo__pair { display: grid; align-items: center; }
+.brand-logo__image { display: block; }
+.brand-logo__image--dark { visibility: hidden; }
+
+[data-theme="dark"] .brand-logo__image--light { visibility: hidden; }
+[data-theme="dark"] .brand-logo__image--dark { visibility: visible; }
+
+.brand-logo--on-dark .brand-logo__image--light { visibility: hidden; }
+.brand-logo--on-dark .brand-logo__image--dark { visibility: visible; }
+.brand-logo--on-light .brand-logo__image--light { visibility: visible; }
+.brand-logo--on-light .brand-logo__image--dark { visibility: hidden; }
+
+.brand-logo--responsive .brand-logo__pair--mark { display: none; }
+.workspace-brand-logo { --brand-logo-width: 136px; }
+.landing-brand-logo { --brand-logo-width: 158px; }
+.footer-brand-logo { --brand-logo-width: 148px; }
+.loading-brand-logo { --brand-logo-width: 54px; margin-bottom: 2px; }
+
+@media (max-width: 640px) {
+  .brand-logo--responsive { --brand-logo-width: 38px; }
+  .brand-logo--responsive .brand-logo__pair--full { display: none; }
+  .brand-logo--responsive .brand-logo__pair--mark { display: grid; }
+  .landing-brand-logo { --brand-logo-width: 42px; }
+}

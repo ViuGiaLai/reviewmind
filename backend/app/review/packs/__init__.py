@@ -186,6 +186,32 @@ class PackLoader:
                 pass
         return merged
 
+    def get_ai_context(self, pack_ids: list[str]) -> dict[str, Any]:
+        """Return the Knowledge Pack material that is safe to place in AI prompts."""
+        context: dict[str, Any] = {
+            "names": [], "prompts": {}, "rubrics": {},
+            "checklists": [], "capabilities": [],
+        }
+        for pack_id in pack_ids:
+            try:
+                pack = self.load(pack_id)
+            except ValueError:
+                continue
+            context["names"].append(f"{pack.name} {pack.version}")
+            context["prompts"].update(pack.prompts)
+            context["rubrics"].update(pack.rubrics)
+            context["checklists"].extend(pack.checklists)
+            context["capabilities"].extend(
+                {
+                    "id": capability.id,
+                    "category": capability.category,
+                    "description": capability.description,
+                }
+                for capability in pack.capabilities
+                if capability.enabled
+            )
+        return context
+
     def _parse_pack(self, data: dict[str, Any], pack_id: str) -> KnowledgePack:
         """Parse raw YAML data into a KnowledgePack object."""
         capabilities = [

@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Issue } from "../main";
+import { Issue } from "../domain/types";
 import { BarChart3, Search, Target } from "lucide-react";
 
 /* ═══════════════════════════════════════════════════════════════════════════════

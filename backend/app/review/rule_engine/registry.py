@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
+import threading
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ..models import DocumentModel, Evidence, Issue, Severity
 from ..profiles import Profile
+from ...operations import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +83,10 @@ class RuleRegistry:
     def __init__(self, enable_parallel: bool = False, max_workers: int = 4):
         self._rules: dict[str, RegisteredRule] = {}
         self._stats: dict[str, RuleStats] = {}
-        self._cache: dict[str, tuple[float, list[Issue]]] = {}  # rule_id -> (timestamp, issues)
-        self._cache_ttl: float = 30.0  # seconds
+        self._cache: OrderedDict[str, tuple[float, list[Issue]]] = OrderedDict()
+        self._cache_ttl: float = 30.0
+        self._cache_max_entries = 512
+        self._cache_lock = threading.Lock()
         self._rule_overrides: dict[str, dict[str, Any]] = {}  # rule_id -> override dict
         self.enable_parallel = enable_parallel
         self._executor = ThreadPoolExecutor(max_workers=max_workers) if enable_parallel else None
@@ -98,7 +105,7 @@ class RuleRegistry:
         """Remove a registered rule."""
         self._rules.pop(rule_id, None)
         self._stats.pop(rule_id, None)
-        self._cache.pop(rule_id, None)
+        self.invalidate_cache(rule_id)
 
     def get(self, rule_id: str) -> RegisteredRule | None:
         return self._rules.get(rule_id)
@@ -213,11 +220,14 @@ class RuleRegistry:
     # ── Cache ─────────────────────────────────────────────────────────────
 
     def invalidate_cache(self, rule_id: str | None = None) -> None:
-        """Invalidate rule cache."""
-        if rule_id:
-            self._cache.pop(rule_id, None)
-        else:
-            self._cache.clear()
+        """Invalidate all fingerprints for one rule, or the full cache."""
+        with self._cache_lock:
+            if rule_id:
+                prefix = f"{rule_id}:"
+                for key in [key for key in self._cache if key.startswith(prefix)]:
+                    self._cache.pop(key, None)
+            else:
+                self._cache.clear()
 
     # ── Execution ─────────────────────────────────────────────────────────
 
@@ -312,18 +322,43 @@ class RuleRegistry:
         priority_override = overrides.get("priority")
         confidence_override = overrides.get("confidence")
 
-        # Check cache
-        cache_key = f"{rule.meta.id}:{hash(document.text[:100])}"
-        if cache_key in self._cache:
-            cached_time, cached_issues = self._cache[cache_key]
-            if time.time() - cached_time < self._cache_ttl:
+        # Full deterministic fingerprint: the previous first-100-character hash
+        # returned wrong findings for documents sharing the same introduction.
+        fingerprint = hashlib.sha256()
+        fingerprint.update(document.text.encode("utf-8", errors="replace"))
+        fingerprint.update(profile.id.encode())
+        fingerprint.update(rule.meta.version.encode())
+        fingerprint.update(json.dumps(rule_config, sort_keys=True, default=str).encode())
+        fingerprint.update(str((
+            document.metadata.default_font,
+            document.metadata.default_font_size,
+            document.metadata.line_spacing,
+            document.metadata.margin_top,
+            document.metadata.margin_bottom,
+            document.metadata.margin_left,
+            document.metadata.margin_right,
+        )).encode())
+        for block in document.blocks:
+            fingerprint.update(str((
+                block.type.value, block.level, block.font_name, block.font_size,
+                block.bold, block.italic, block.alignment, block.style_name,
+            )).encode())
+        cache_key = f"{rule.meta.id}:{fingerprint.hexdigest()}"
+        with self._cache_lock:
+            cached = self._cache.get(cache_key)
+            if cached and time.time() - cached[0] < self._cache_ttl:
+                self._cache.move_to_end(cache_key)
+                metrics.increment("reviewmind_rule_cache_total", outcome="hit")
                 return RuleResult(
                     rule_id=rule.meta.id,
-                    issues=cached_issues,
+                    issues=cached[1],
                     execution_time_ms=0,
                     success=True,
                     version=rule.meta.version,
                 )
+            if cached:
+                self._cache.pop(cache_key, None)
+        metrics.increment("reviewmind_rule_cache_total", outcome="miss")
 
         try:
             # Timeout enforcement (runs in thread if timeout configured)
@@ -337,8 +372,12 @@ class RuleRegistry:
 
             elapsed = (time.time() - start) * 1000
 
-            # Update cache
-            self._cache[cache_key] = (time.time(), result_issues)
+            # Bounded LRU avoids an unbounded per-process memory leak.
+            with self._cache_lock:
+                self._cache[cache_key] = (time.time(), result_issues)
+                self._cache.move_to_end(cache_key)
+                while len(self._cache) > self._cache_max_entries:
+                    self._cache.popitem(last=False)
 
             # Apply severity/confidence overrides to issues
             if severity_override or confidence_override:

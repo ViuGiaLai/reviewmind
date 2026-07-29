@@ -10,7 +10,8 @@ from dotenv import load_dotenv
 # Load .env from project root (two levels up from this file)
 _env_path = Path(__file__).resolve().parents[2] / ".env"
 if _env_path.exists():
-    load_dotenv(dotenv_path=_env_path, override=True)
+    # Explicit process/container environment must take precedence over local developer defaults.
+    load_dotenv(dotenv_path=_env_path, override=False)
 
 
 
@@ -62,10 +63,11 @@ class StorageSettings:
 class AppSettings:
     """Application-wide settings."""
 
-    debug: bool = os.getenv("REVIEWMIND_DEBUG", "true").lower() in ("true", "1", "yes")
+    debug: bool = os.getenv("REVIEWMIND_DEBUG", "false").lower() in ("true", "1", "yes")
     cors_origins: list[str] = field(default_factory=lambda: [
         o.strip() for o in os.getenv("REVIEWMIND_CORS_ORIGINS", "http://localhost:5173").split(",")
     ])
+    allow_anonymous: bool = os.getenv("REVIEWMIND_ALLOW_ANONYMOUS", "false").lower() in ("true", "1", "yes")
     max_file_size: int = int(os.getenv("REVIEWMIND_MAX_FILE_SIZE", str(50 * 1024 * 1024)))
     upload_chunk_size: int = int(os.getenv("REVIEWMIND_UPLOAD_CHUNK_SIZE", str(1024 * 1024)))
 
@@ -73,6 +75,14 @@ class AppSettings:
     cleanup_days: int = int(os.getenv("REVIEWMIND_CLEANUP_DAYS", "90"))
     cleanup_enabled: bool = os.getenv("REVIEWMIND_CLEANUP_ENABLED", "false").lower() in ("true", "1")
 
+
+@dataclass
+class PerformanceSettings:
+    """Capacity guardrails and latency budgets."""
+
+    max_concurrent_reviews: int = max(1, int(os.getenv("REVIEWMIND_MAX_CONCURRENT_REVIEWS", "4")))
+    review_queue_timeout_seconds: float = max(0.1, float(os.getenv("REVIEWMIND_REVIEW_QUEUE_TIMEOUT_SECONDS", "2")))
+    database_statement_timeout_ms: int = max(1000, int(os.getenv("REVIEWMIND_DB_STATEMENT_TIMEOUT_MS", "30000")))
 
 @dataclass
 class LLMSettings:
@@ -97,10 +107,16 @@ class LLMSettings:
     # Clerk authentication
     clerk_secret_key: str = os.getenv("CLERK_SECRET_KEY", "")
     clerk_domain: str = os.getenv("CLERK_DOMAIN", "")
+    clerk_audience: str = os.getenv("CLERK_AUDIENCE", "")
+    clerk_webhook_secret: str = os.getenv("CLERK_WEBHOOK_SECRET", "")
 
     @property
     def has_any_key(self) -> bool:
-        return bool(self.gemini_api_key or self.openrouter_api_key or self.github_token or self.nvidia_api_key or self.cohere_api_key)
+        return bool(
+            self.gemini_api_key or self.openrouter_api_key or self.github_token
+            or self.nvidia_api_key or self.cohere_api_key or self.openai_api_key
+            or self.anthropic_api_key
+        )
 
 
 @dataclass
@@ -110,6 +126,7 @@ class Settings:
     app: AppSettings = field(default_factory=AppSettings)
     database: DatabaseSettings = field(default_factory=DatabaseSettings)
     storage: StorageSettings = field(default_factory=StorageSettings)
+    performance: PerformanceSettings = field(default_factory=PerformanceSettings)
     llm: LLMSettings = field(default_factory=LLMSettings)
 
 

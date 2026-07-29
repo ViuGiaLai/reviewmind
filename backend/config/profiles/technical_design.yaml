@@ -1,6 +1,36 @@
 id: technical_design
-name: Technical Design Document
-categories: [structure, writing, format]
-weights: {structure: 50, writing: 30, format: 20}
-permissions: {structure: 3, writing: 2, format: 2}
-required_sections: [Overview, Architecture, Components, Configuration]
+name: Technical Design
+description: "For software architecture, API docs, system design"
+version: "2.0.0"
+document_types:
+  - software_architecture
+  - system_design
+  - api_specification
+  - technical_spec
+  - user_manual
+categories: [structure, writing, formatting, logic]
+weights:
+  structure: 35
+  writing: 25
+  formatting: 20
+  logic: 20
+permissions:
+  writing: 3
+  formatting: 3
+  structure: 2
+  logic: 1
+required_sections: [Overview, Architecture, Components]
+forbidden_sections: []
+rubric:
+  structure: "Clear component breakdown"
+  writing: "Unambiguous, precise technical writing"
+  formatting: "Code blocks and APIs properly formatted"
+  logic: "Logical flow and architectural consistency"
+ai_focus:
+  - precision
+  - clarity
+auto_fix_policy:
+  formatting: safe
+  structure: assisted
+  writing: ai
+  logic: manual

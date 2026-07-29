@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -241,7 +242,10 @@ class LLMRouter:
         cfg.temperature = 0.1
 
         result = await self.route(
-            prompt=f"{prompt}\n\nIMPORTANT: Respond with valid JSON only, matching the provided schema.",
+            prompt=(
+                f"{prompt}\n\nIMPORTANT: Respond with valid JSON only. "
+                f"Match this JSON Schema exactly:\n{json.dumps(output_schema, ensure_ascii=False)}"
+            ),
             system_prompt=system_prompt,
             config=cfg,
         )

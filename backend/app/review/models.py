@@ -367,6 +367,13 @@ class ReviewRequest:
     profile_id: str = "academic"
     pack_ids: list[str] = field(default_factory=list)
     enabled_categories: list[str] | None = None
+    review_mode: str = "rule_ai"
+    report_language: str = "en"
+    source_content: bytes | None = None
+    reference_template: dict[str, Any] | None = None
+    reference_template_id: str = ""
+    profile_overrides: dict[str, Any] = field(default_factory=dict)
+    scoring_mode: str = "standard"
 
 
 @dataclass(slots=True, frozen=True)
@@ -386,3 +393,59 @@ class ReviewResult:
     rule_stats: dict[str, Any] = field(default_factory=dict)
     pipeline_status: dict[str, Any] = field(default_factory=dict)
     detected_profile: str = ""
+
+
+# ─── Document Graph (Chapter 5 - Document Understanding) ──────────────────────
+
+@dataclass
+class DocumentRelation:
+    """Relationship between two document nodes."""
+    source_node_id: str
+    target_node_id: str
+    relation_type: str  # "contains", "references", "precedes", "captions", "cites"
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class DocumentGraph:
+    """Graph of relationships between document components."""
+    nodes: dict[str, Any] = field(default_factory=dict)  # node_id -> component
+    edges: list[DocumentRelation] = field(default_factory=list)
+
+    def add_relation(self, source: str, target: str, relation_type: str, **metadata):
+        self.edges.append(DocumentRelation(source, target, relation_type, metadata))
+
+    def get_children(self, node_id: str, relation_type: str = None) -> list[str]:
+        return [
+            e.target_node_id for e in self.edges
+            if e.source_node_id == node_id and (relation_type is None or e.relation_type == relation_type)
+        ]
+
+    def get_parents(self, node_id: str, relation_type: str = None) -> list[str]:
+        return [
+            e.source_node_id for e in self.edges
+            if e.target_node_id == node_id and (relation_type is None or e.relation_type == relation_type)
+        ]
+
+    def find_orphan_figures(self) -> list[str]:
+        """Find figures that are not mentioned in the document text."""
+        figures = {nid for nid, n in self.nodes.items() if n.get('type') == 'figure'}
+        mentioned = {e.target_node_id for e in self.edges if e.relation_type == 'mentions'}
+        return list(figures - mentioned)
+
+    def find_uncited_references(self) -> list[str]:
+        """Find references that are never cited in the text."""
+        refs = {nid for nid, n in self.nodes.items() if n.get('type') == 'reference'}
+        cited = {e.target_node_id for e in self.edges if e.relation_type == 'cites'}
+        return list(refs - cited)
+
+
+# ─── Detection Types (Chapter 4) ───────────────────────────────────────────────
+
+@dataclass
+class DocumentTypeInfo:
+    """Information about the detected document type."""
+    type_id: str
+    profile_id: str
+    confidence: float
+    signals: list[str] = field(default_factory=list)

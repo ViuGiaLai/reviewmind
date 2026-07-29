@@ -9,6 +9,7 @@ class AISchedulingDecision:
     should_run: bool
     reason: str
     required_capabilities: tuple[str, ...] = ()
+    evaluation_types: tuple[str, ...] = ()
 
 
 class AIReviewScheduler:
@@ -39,10 +40,22 @@ class AIReviewScheduler:
         if profile_id == "sop" and "writing" in categories:
             return AISchedulingDecision(False, "SOP profiles disable AI-assisted rewriting and writing enhancement.", ())
 
-        if not any(getattr(issue, "category", "") in {"writing", "logic", "summary"} for issue in issues):
+        semantic_categories = {"writing", "logic", "summary", "technical"}
+        ai_focus = tuple(getattr(profile, "ai_focus", ()) or ())
+        has_semantic_issue = any(
+            getattr(issue, "category", "") in semantic_categories for issue in issues
+        )
+        has_semantic_scope = bool(categories & semantic_categories) or bool(ai_focus)
+        if not has_semantic_issue and not has_semantic_scope:
             return AISchedulingDecision(False, self._default_reason, ())
 
-        if not permissions.get("rewrite", 0) and not permissions.get("explain", 0):
+        # Permission levels are category based: 1=detect, 2=explain,
+        # 3=suggest, 4=rewrite, 5=autofix.
+        allowed_levels = [
+            int(permissions.get(category, 0) or 0)
+            for category in (categories & semantic_categories)
+        ]
+        if allowed_levels and max(allowed_levels) < 2:
             return AISchedulingDecision(False, "Profile does not allow AI-assisted explanation or rewrite actions.", ())
 
         if len(document_text.split()) < 80:
@@ -51,5 +64,6 @@ class AIReviewScheduler:
         return AISchedulingDecision(
             True,
             "Document contains high-value writing or logic issues that can benefit from AI assistance.",
-            ("rewrite", "explain"),
+            ("detect", "explain"),
+            ai_focus or tuple(sorted(categories & semantic_categories)),
         )

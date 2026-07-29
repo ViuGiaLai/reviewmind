@@ -2,15 +2,50 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.config import settings
+from app.security import audit_log, verify_svix_webhook, WebhookVerificationError
 
 logger = logging.getLogger(__name__)
+
+_JWKS_TTL_SECONDS = 15 * 60
+_jwks_cache: dict[str, Any] | None = None
+_jwks_cache_expires_at = 0.0
+_jwks_lock = asyncio.Lock()
+
+
+async def _get_clerk_jwks(*, force_refresh: bool = False) -> dict[str, Any]:
+    """Return cached Clerk signing keys and refresh safely on rotation."""
+    global _jwks_cache, _jwks_cache_expires_at
+    now = time.monotonic()
+    if not force_refresh and _jwks_cache and now < _jwks_cache_expires_at:
+        return _jwks_cache
+
+    async with _jwks_lock:
+        now = time.monotonic()
+        if not force_refresh and _jwks_cache and now < _jwks_cache_expires_at:
+            return _jwks_cache
+        if not settings.llm.clerk_domain:
+            raise ValueError("CLERK_DOMAIN is not configured")
+        import httpx
+
+        url = f"https://{settings.llm.clerk_domain}/.well-known/jwks.json"
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            payload = response.json()
+        if not payload.get("keys"):
+            raise ValueError("Clerk JWKS response contains no signing keys")
+        _jwks_cache = payload
+        _jwks_cache_expires_at = time.monotonic() + _JWKS_TTL_SECONDS
+        return payload
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -28,7 +63,27 @@ async def clerk_webhook(request: Request) -> dict[str, Any]:
     In production, verify the webhook signature using CLERK_WEBHOOK_SECRET.
     For now, log and acknowledge events.
     """
-    payload = await request.json()
+    body = await request.body()
+    webhook_secret = settings.llm.clerk_webhook_secret
+    if webhook_secret:
+        try:
+            verify_svix_webhook(
+                body,
+                message_id=request.headers.get("svix-id", ""),
+                timestamp=request.headers.get("svix-timestamp", ""),
+                signature_header=request.headers.get("svix-signature", ""),
+                secret=webhook_secret,
+            )
+        except WebhookVerificationError as error:
+            audit_log.record(
+                actor_id="clerk", action="auth.webhook", resource_type="identity",
+                outcome="denied", metadata={"reason": str(error)},
+            )
+            raise HTTPException(status_code=401, detail="Invalid webhook signature.") from error
+    elif settings.llm.clerk_secret_key:
+        raise HTTPException(status_code=503, detail="Webhook verification is not configured.")
+
+    payload = json.loads(body)
     event_type = payload.get("type", "unknown")
     data = payload.get("data", {})
 
@@ -51,6 +106,10 @@ async def clerk_webhook(request: Request) -> dict[str, Any]:
         # Note: We keep users in the local DB to preserve review history, 
         # or implement a soft delete here if required.
 
+    audit_log.record(
+        actor_id="clerk", action=f"auth.{event_type}", resource_type="user",
+        resource_id=str(data.get("id", "")),
+    )
     return {"received": True, "type": event_type}
 
 
@@ -64,8 +123,9 @@ async def verify_clerk_session(request: Request) -> dict[str, Any]:
     When CLERK_SECRET_KEY is not set, this is a no-op (development mode).
     """
     if not settings.llm.clerk_secret_key:
-        # Development mode — no auth required
-        return {"user_id": "dev-user", "role": "admin"}
+        if settings.app.allow_anonymous:
+            return {"user_id": None, "role": "admin"}
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Authentication is not configured.")
 
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -75,90 +135,68 @@ async def verify_clerk_session(request: Request) -> dict[str, Any]:
         )
 
     try:
-        token = auth_header.replace("Bearer ", "")
-        # Use Clerk's JWKS endpoint to verify the token
-        # For production, use `clerk-sdk-python` or manual JWKS verification
-        # https://clerk.com/docs/backend-requests/handling/pizzly
+        token = auth_header.removeprefix("Bearer ").strip()
         from jose import jwk, jwt
         from jose.constants import Algorithms
 
-        # Get JWKS from Clerk
-        import httpx
-        jwks_url = f"https://{settings.llm.clerk_domain}/.well-known/jwks.json"
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(jwks_url)
-            jwks = resp.json()
+        header = jwt.get_unverified_header(token)
+        key_id = header.get("kid")
+        if not key_id:
+            raise ValueError("Token key ID is missing")
 
-        # Decode and verify the JWT
-        header = jwt.get_header(token)
-        key = None
-        for jwk_key in jwks.get("keys", []):
-            if jwk_key.get("kid") == header.get("kid"):
-                key = jwk.construct(jwk_key)
-                break
-
-        if not key:
-            raise ValueError("No matching JWK key found")
+        jwks = await _get_clerk_jwks()
+        key_data = next((item for item in jwks.get("keys", []) if item.get("kid") == key_id), None)
+        if key_data is None:
+            # Clerk may have rotated keys while our cache was warm.
+            jwks = await _get_clerk_jwks(force_refresh=True)
+            key_data = next((item for item in jwks.get("keys", []) if item.get("kid") == key_id), None)
+        if key_data is None:
+            raise ValueError("No matching Clerk signing key found")
+        key = jwk.construct(key_data, algorithm=Algorithms.RS256)
 
         payload = jwt.decode(
             token,
             key,
             algorithms=[Algorithms.RS256],
-            audience="",
+            audience=settings.llm.clerk_audience or None,
             issuer=f"https://{settings.llm.clerk_domain}",
+            options={"verify_aud": bool(settings.llm.clerk_audience)},
         )
-        return {"user_id": payload.get("sub"), "role": payload.get("role", "user")}
+        user_id = payload.get("sub")
+        if not user_id:
+            raise ValueError("Token subject is missing")
+        role = payload.get("role") or payload.get("public_metadata", {}).get("role", "user")
+        audit_log.record(
+            actor_id=user_id, action="auth.session_verified", resource_type="session"
+        )
+        return {"user_id": user_id, "role": role}
 
     except Exception as e:
         logger.warning(f"Clerk JWT verification failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid session: {e}",
+            detail="Invalid session.",
         )
 
 
 # ── Sync dependency for endpoints that need user_id ────────────────────────
 
 
-def get_current_user_id(request: Request) -> str | None:
-    """
-    Extract the current user's Clerk ID from the Authorization header.
+async def get_current_user_id(request: Request) -> str | None:
+    """Return the verified Clerk user ID, or anonymous only when explicitly enabled."""
+    session = await verify_clerk_session(request)
+    return session["user_id"]
 
-    In development mode (no CLERK_SECRET_KEY set), returns 'dev-user'.
-    In production, parses the Clerk JWT session token.
 
-    Usage: add `user_id: str | None = Depends(get_current_user_id)` to any route.
-    """
-    if not settings.llm.clerk_secret_key:
-        # Development mode — no auth required
-        return "dev-user"
-
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return None
-
-    try:
-        token = auth_header.replace("Bearer ", "")
-        # Simple JWT decode — extract the payload without full verification
-        # (full verification uses JWKS; see verify_clerk_session above)
-        import base64
-        import json
-
-        parts = token.split(".")
-        if len(parts) != 3:
-            return None
-
-        # Decode the payload (second part of JWT)
-        payload_b64 = parts[1]
-        # Add padding
-        payload_b64 += "=" * (4 - len(payload_b64) % 4)
-        payload_bytes = base64.urlsafe_b64decode(payload_b64)
-        payload = json.loads(payload_bytes)
-
-        return payload.get("sub")
-    except Exception:
-        return None
-
+def require_resource_owner(
+    resource: dict[str, Any] | None,
+    user_id: str | None,
+    detail: str = "Resource not found.",
+) -> dict[str, Any]:
+    """Hide resources not owned by the active account, including legacy NULL-owned rows."""
+    if resource is None or (user_id is not None and resource.get("user_id") != user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+    return resource
 
 # ── Sync User on Login (frontend calls this) ──────────────────────────────
 

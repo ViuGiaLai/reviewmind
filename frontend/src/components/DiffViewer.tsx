@@ -1,16 +1,19 @@
+import { useTranslation } from "react-i18next";
+
 /* ═══════════════════════════════════════════════════════════════════════════════
    Diff Viewer — Side-by-side original vs suggested
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 export function DiffViewer({ original, suggested }: { original: string; suggested: string }) {
+  const { t } = useTranslation();
   const origLines = original.split("\n");
   const suggLines = suggested.split("\n");
 
   return (
     <div className="diff-viewer">
       <div className="diff-header">
-        <span className="diff-header-original">Original</span>
-        <span className="diff-header-suggested">Suggested</span>
+        <span className="diff-header-original">{t("diff.original")}</span>
+        <span className="diff-header-suggested">{t("diff.suggested")}</span>
       </div>
       <div className="diff-panels">
         <div className="diff-panel original">
