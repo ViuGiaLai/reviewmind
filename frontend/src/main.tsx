@@ -134,7 +134,7 @@ function breadcrumb(page: Page, docName?: string): { label: string; page?: Page 
 
 function App() {
   const [page, setPage] = useState<Page>("home");
-  const [theme, setTheme] = useState<"light" | "dark">(() => (safeGetItem("theme") as "light" | "dark") || "light");
+  const [theme, setTheme] = useState<"light" | "dark">(() => (safeGetItem("theme") as "light" | "dark") || "dark");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [text, setText] = useState("# Review Document\n\nThis is a sample document for review. The engine will analyze this text for quality, consistency, and compliance issues based on the selected profile.");
