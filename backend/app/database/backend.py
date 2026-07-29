@@ -15,12 +15,22 @@ class DatabaseBackend(ABC):
     """Abstract interface for database operations."""
 
     @abstractmethod
-    def initialize(self) -> None: ...
+    def initialize(self) -> None:
+        """Initialize the database (create tables/schema if needed)."""
+        ...
 
-    # ── Documents ────────────────────────────────────────────────────────
+    # ── Users ─────────────────────────────────────────────────────────────────
 
     @abstractmethod
-    def save_document(self, original_name: str, content_type: str, size: int, storage_path: str) -> str: ...
+    def upsert_user(self, id: str, email: str, name: str, avatar_url: str) -> None: ...
+
+    @abstractmethod
+    def get_user(self, id: str) -> dict[str, Any] | None: ...
+
+    # ── Documents ─────────────────────────────────────────────────────────────
+
+    @abstractmethod
+    def save_document(self, original_name: str, content_type: str, size: int, storage_path: str, user_id: str | None = None) -> str: ...
 
     @abstractmethod
     def get_document(self, doc_id: str) -> dict[str, Any] | None: ...
@@ -48,6 +58,7 @@ class DatabaseBackend(ABC):
         categories: list[str],
         result: ReviewResult,
         document_id: str | None = None,
+        user_id: str | None = None,
     ) -> str: ...
 
     @abstractmethod
@@ -176,8 +187,17 @@ class DatabaseBackend(ABC):
 
 # Tables only — safe for executescript even on existing DBs
 CREATE_TABLES_SQL = """
+CREATE TABLE IF NOT EXISTS users (
+    id              TEXT PRIMARY KEY,
+    email           TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    avatar_url      TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS documents (
     id              TEXT PRIMARY KEY,
+    user_id         TEXT REFERENCES users(id) ON DELETE CASCADE,
     original_name   TEXT NOT NULL,
     content_type    TEXT NOT NULL DEFAULT '',
     size            INTEGER NOT NULL DEFAULT 0,
@@ -187,6 +207,7 @@ CREATE TABLE IF NOT EXISTS documents (
 
 CREATE TABLE IF NOT EXISTS review_sessions (
     id              TEXT PRIMARY KEY,
+    user_id         TEXT REFERENCES users(id) ON DELETE CASCADE,
     document_id     TEXT REFERENCES documents(id) ON DELETE SET NULL,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     filename        TEXT NOT NULL,

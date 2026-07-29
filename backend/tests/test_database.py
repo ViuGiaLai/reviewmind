@@ -223,6 +223,7 @@ def test_alembic_migration_up_and_down():
         env = os.environ.copy()
         env["REVIEWMIND_SQLITE_PATH"] = str(db_path)
         env["REVIEWMIND_AUTO_MIGRATE"] = "false"
+        env["REVIEWMIND_PG_DSN"] = ""
         cwd = Path(__file__).resolve().parent.parent
 
         # Step 1: Run alembic upgrade head

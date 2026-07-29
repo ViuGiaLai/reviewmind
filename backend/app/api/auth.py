@@ -18,6 +18,9 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 # ── Clerk Webhook ────────────────────────────────────────────────────────────
 
 
+from app.database import create_database
+database = create_database()
+
 @router.post("/webhook")
 async def clerk_webhook(request: Request) -> dict[str, Any]:
     """Receive Clerk webhook events (user.created, user.updated, user.deleted).
@@ -31,13 +34,22 @@ async def clerk_webhook(request: Request) -> dict[str, Any]:
 
     logger.info(f"Clerk webhook: {event_type} — user={data.get('id', 'unknown')}")
 
-    if event_type == "user.created":
-        # TODO: Save user to local database
-        logger.info(f"New user signed up: {data.get('email_addresses', [{}])[0].get('email_address', 'unknown')}")
-    elif event_type == "user.updated":
-        logger.info(f"User updated: {data.get('id')}")
+    if event_type in ("user.created", "user.updated"):
+        user_id = data.get("id")
+        email = data.get("email_addresses", [{}])[0].get("email_address", "")
+        first_name = data.get("first_name") or ""
+        last_name = data.get("last_name") or ""
+        name = f"{first_name} {last_name}".strip() or "Unknown User"
+        avatar_url = data.get("image_url", "")
+        
+        if user_id and email:
+            database.upsert_user(id=user_id, email=email, name=name, avatar_url=avatar_url)
+            logger.info(f"User synced: {email}")
+
     elif event_type == "user.deleted":
         logger.info(f"User deleted: {data.get('id')}")
+        # Note: We keep users in the local DB to preserve review history, 
+        # or implement a soft delete here if required.
 
     return {"received": True, "type": event_type}
 

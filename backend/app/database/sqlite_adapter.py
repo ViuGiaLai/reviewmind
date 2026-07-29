@@ -103,14 +103,34 @@ class SQLiteAdapter(DatabaseBackend):
                 except Exception:
                     pass  # Index may already exist or column missing; skip gracefully
 
+    # ── Users ─────────────────────────────────────────────────────────────────
+
+    def upsert_user(self, id: str, email: str, name: str, avatar_url: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO users (id, email, name, avatar_url) 
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT (id) DO UPDATE SET 
+                   email = excluded.email, 
+                   name = excluded.name, 
+                   avatar_url = excluded.avatar_url""",
+                (id, email, name, avatar_url)
+            )
+            conn.commit()
+
+    def get_user(self, id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM users WHERE id = ?", (id,)).fetchone()
+        return dict(row) if row else None
+
     # ── Documents ─────────────────────────────────────────────────────────────
 
-    def save_document(self, original_name: str, content_type: str, size: int, storage_path: str) -> str:
+    def save_document(self, original_name: str, content_type: str, size: int, storage_path: str, user_id: str | None = None) -> str:
         doc_id = str(uuid4())
-        with self._connect() as connection:
-            connection.execute(
-                "INSERT INTO documents (id, original_name, content_type, size, storage_path) VALUES (?, ?, ?, ?, ?)",
-                (doc_id, original_name, content_type, size, storage_path),
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO documents (id, user_id, original_name, content_type, size, storage_path) VALUES (?, ?, ?, ?, ?, ?)",
+                (doc_id, user_id, original_name, content_type, size, storage_path),
             )
         return doc_id
 
@@ -158,27 +178,28 @@ class SQLiteAdapter(DatabaseBackend):
         categories: list[str],
         result: ReviewResult,
         document_id: str | None = None,
+        user_id: str | None = None,
     ) -> str:
         session_id = str(uuid4())
-        # Serialize issues to JSON for legacy result_json column (some DBs have it NOT NULL)
-        result_json = json.dumps(
-            [{"id": i.id, "severity": i.severity.value, "message": i.message, "rule_id": i.rule_id} for i in result.issues],
-            ensure_ascii=False,
-        )
-        with self._connect() as connection:
+        with self._connect() as conn:
             # Detect whether result_json column exists in this DB
             existing_cols = {
                 row["name"]
-                for row in connection.execute("PRAGMA table_info(review_sessions)").fetchall()
+                for row in conn.execute("PRAGMA table_info(review_sessions)").fetchall()
             }
             if "result_json" in existing_cols:
-                connection.execute(
+                # Serialize issues to JSON for legacy result_json column (some DBs have it NOT NULL)
+                result_json = json.dumps(
+                    [{"id": i.id, "severity": i.severity.value, "message": i.message, "rule_id": i.rule_id} for i in result.issues],
+                    ensure_ascii=False,
+                )
+                conn.execute(
                     """INSERT INTO review_sessions
-                       (id, document_id, filename, profile_id, pack_ids, categories, status,
+                       (id, user_id, document_id, filename, profile_id, pack_ids, categories, status,
                         score, category_scores, summary, report_markdown, result_json)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
-                        session_id, document_id, filename, profile_id,
+                        session_id, user_id, document_id, filename, profile_id,
                         json.dumps(pack_ids, ensure_ascii=False),
                         json.dumps(categories, ensure_ascii=False),
                         "completed", result.score,
@@ -187,13 +208,13 @@ class SQLiteAdapter(DatabaseBackend):
                     ),
                 )
             else:
-                connection.execute(
+                conn.execute(
                     """INSERT INTO review_sessions
-                       (id, document_id, filename, profile_id, pack_ids, categories, status,
+                       (id, user_id, document_id, filename, profile_id, pack_ids, categories, status,
                         score, category_scores, summary, report_markdown)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
-                        session_id, document_id, filename, profile_id,
+                        session_id, user_id, document_id, filename, profile_id,
                         json.dumps(pack_ids, ensure_ascii=False),
                         json.dumps(categories, ensure_ascii=False),
                         "completed", result.score,
@@ -202,7 +223,7 @@ class SQLiteAdapter(DatabaseBackend):
                     ),
                 )
             for issue_row in _serialize_issues(result, session_id):
-                connection.execute(
+                conn.execute(
                     """INSERT INTO issues
                        (id, session_id, issue_id, category, rule_id, severity, message,
                         recommendation, evidence_excerpt, evidence_line_start, evidence_line_end,

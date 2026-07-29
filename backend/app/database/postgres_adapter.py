@@ -54,7 +54,7 @@ class PostgresAdapter(DatabaseBackend):
 
         try:
             with self._connect() as conn:
-                with conn.cursor() as cur:
+                with self._cursor() as cur:
                     # Check if tables exist first
                     cur.execute("""
                         SELECT EXISTS (
@@ -66,10 +66,20 @@ class PostgresAdapter(DatabaseBackend):
                     if exists:
                         return
 
-                with conn.cursor() as cur:
+                with self._cursor() as cur:
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS users (
+                            id              VARCHAR(255) PRIMARY KEY,
+                            email           VARCHAR(255) NOT NULL,
+                            name            VARCHAR(255) NOT NULL,
+                            avatar_url      TEXT NOT NULL DEFAULT '',
+                            created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+                        )
+                    """)
                     cur.execute("""
                         CREATE TABLE IF NOT EXISTS documents (
                             id              VARCHAR(255) PRIMARY KEY,
+                            user_id         VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
                             original_name   TEXT NOT NULL,
                             content_type    TEXT NOT NULL DEFAULT '',
                             size            BIGINT NOT NULL DEFAULT 0,
@@ -80,6 +90,7 @@ class PostgresAdapter(DatabaseBackend):
                     cur.execute("""
                         CREATE TABLE IF NOT EXISTS review_sessions (
                             id              VARCHAR(255) PRIMARY KEY,
+                            user_id         VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
                             document_id     VARCHAR(255) REFERENCES documents(id) ON DELETE SET NULL,
                             created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
                             filename        TEXT NOT NULL,
@@ -124,22 +135,45 @@ class PostgresAdapter(DatabaseBackend):
             # Fall back to individual table creation
             pass
 
+    # ── Users ─────────────────────────────────────────────────────────────────
+
+    def upsert_user(self, id: str, email: str, name: str, avatar_url: str) -> None:
+        with self._connect() as conn:
+            with self._cursor() as cur:
+                cur.execute(
+                    """INSERT INTO users (id, email, name, avatar_url) 
+                       VALUES (%s, %s, %s, %s)
+                       ON CONFLICT (id) DO UPDATE SET 
+                       email = EXCLUDED.email, 
+                       name = EXCLUDED.name, 
+                       avatar_url = EXCLUDED.avatar_url""",
+                    (id, email, name, avatar_url)
+                )
+            conn.commit()
+
+    def get_user(self, id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            with self._cursor() as cur:
+                cur.execute("SELECT * FROM users WHERE id = %s", (id,))
+                row = cur.fetchone()
+        return dict(row) if row else None
+
     # ── Documents ─────────────────────────────────────────────────────────────
 
-    def save_document(self, original_name: str, content_type: str, size: int, storage_path: str) -> str:
+    def save_document(self, original_name: str, content_type: str, size: int, storage_path: str, user_id: str | None = None) -> str:
         doc_id = str(uuid4())
         with self._connect() as conn:
-            with conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(
-                    "INSERT INTO documents (id, original_name, content_type, size, storage_path) VALUES (%s, %s, %s, %s, %s)",
-                    (doc_id, original_name, content_type, size, storage_path),
+                    "INSERT INTO documents (id, user_id, original_name, content_type, size, storage_path) VALUES (%s, %s, %s, %s, %s, %s)",
+                    (doc_id, user_id, original_name, content_type, size, storage_path),
                 )
             conn.commit()
         return doc_id
 
     def get_document(self, doc_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
-            with conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("SELECT * FROM documents WHERE id = %s", (doc_id,))
                 row = cur.fetchone()
         if row is None:
@@ -156,17 +190,18 @@ class PostgresAdapter(DatabaseBackend):
         categories: list[str],
         result: ReviewResult,
         document_id: str | None = None,
+        user_id: str | None = None,
     ) -> str:
         session_id = str(uuid4())
         with self._connect() as conn:
-            with conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(
                     """INSERT INTO review_sessions
-                       (id, document_id, filename, profile_id, pack_ids, categories, status,
+                       (id, user_id, document_id, filename, profile_id, pack_ids, categories, status,
                         score, category_scores, summary, report_markdown)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (
-                        session_id, document_id, filename, profile_id,
+                        session_id, user_id, document_id, filename, profile_id,
                         json.dumps(pack_ids, ensure_ascii=False),
                         json.dumps(categories, ensure_ascii=False),
                         "completed", result.score,
@@ -191,7 +226,7 @@ class PostgresAdapter(DatabaseBackend):
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
-            with conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("SELECT * FROM review_sessions WHERE id = %s", (session_id,))
                 row = cur.fetchone()
         if row is None:
@@ -234,7 +269,7 @@ class PostgresAdapter(DatabaseBackend):
         where = " AND ".join(conditions) if conditions else "TRUE"
 
         with self._connect() as conn:
-            with conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(f"SELECT COUNT(*) as cnt FROM review_sessions s WHERE {where}", params)
                 total = cur.fetchone()["cnt"]
 
@@ -253,7 +288,7 @@ class PostgresAdapter(DatabaseBackend):
 
     def delete_session(self, session_id: str) -> bool:
         with self._connect() as conn:
-            with conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("DELETE FROM review_sessions WHERE id = %s", (session_id,))
                 deleted = cur.rowcount > 0
             conn.commit()
@@ -294,7 +329,7 @@ class PostgresAdapter(DatabaseBackend):
         where = " AND ".join(conditions)
 
         with self._connect() as conn:
-            with conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(f"SELECT COUNT(*) as cnt FROM issues i WHERE {where}", params)
                 total = cur.fetchone()["cnt"]
 
@@ -313,7 +348,7 @@ class PostgresAdapter(DatabaseBackend):
 
     def get_issue(self, issue_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
-            with conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("SELECT * FROM issues WHERE id = %s", (issue_id,))
                 row = cur.fetchone()
         return dict(row) if row else None
@@ -321,7 +356,7 @@ class PostgresAdapter(DatabaseBackend):
     def update_issue_status(self, issue_id: str, status: str) -> bool:
         resolved_at = datetime.now(timezone.utc).isoformat() if status in ("resolved", "ignored") else None
         with self._connect() as conn:
-            with conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(
                     "UPDATE issues SET status = %s, resolved_at = COALESCE(%s, resolved_at) WHERE id = %s",
                     (status, resolved_at, issue_id),
@@ -338,7 +373,7 @@ class PostgresAdapter(DatabaseBackend):
             params.append(category)
         resolved_at = datetime.now(timezone.utc).isoformat() if status in ("resolved", "ignored") else None
         with self._connect() as conn:
-            with conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(
                     f"UPDATE issues SET status = %s, resolved_at = COALESCE(%s, resolved_at) WHERE {' AND '.join(conditions)}",
                     [status, resolved_at, *params],
@@ -349,7 +384,7 @@ class PostgresAdapter(DatabaseBackend):
 
     def get_issue_history(self, issue_id_pattern: str, session_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
-            with conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(
                     "SELECT document_id FROM review_sessions WHERE id = %s", (session_id,)
                 )
@@ -370,7 +405,7 @@ class PostgresAdapter(DatabaseBackend):
 
     def get_sessions_for_document(self, document_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
-            with conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(
                     """SELECT id, created_at, profile_id, status, score, summary
                        FROM review_sessions WHERE document_id = %s
@@ -402,3 +437,53 @@ class PostgresAdapter(DatabaseBackend):
 
     def get_packs_for_profile(self, profile_id: str) -> list[dict[str, Any]]:
         return [p for p in self.list_packs() if p.get("profile") == profile_id]
+
+    # --- STUBS FOR MISSING METHODS ---
+
+    def list_documents(self, limit: int = 50, offset: int = 0, search: str | None = None, content_type: str | None = None) -> tuple[list[dict[str, Any]], int]:
+        with self._connect() as conn:
+            with self._cursor() as cur:
+                cur.execute("SELECT * FROM documents LIMIT %s OFFSET %s", (limit, offset))
+                rows = cur.fetchall()
+                cur.execute("SELECT COUNT(*) as cnt FROM documents")
+                count = cur.fetchone()["cnt"]
+        return [dict(r) for r in rows], count
+
+    def delete_document(self, doc_id: str) -> bool:
+        with self._connect() as conn:
+            with self._cursor() as cur:
+                cur.execute("DELETE FROM documents WHERE id = %s", (doc_id,))
+                return cur.rowcount > 0
+
+    def list_all_issues(self, severity: str | None = None, category: str | None = None, status: str | None = None, search: str | None = None, limit: int = 100, offset: int = 0) -> tuple[list[dict[str, Any]], int]:
+        return [], 0
+
+    def get_issue_evidence(self, issue_id: str) -> dict[str, Any] | None:
+        return None
+
+    def get_dashboard_stats(self) -> dict[str, Any]:
+        return {
+            "total_reviews": 0, "average_score": 0, "total_issues": 0, "open_issues": 0, "resolved_issues": 0,
+            "issues_by_severity": {}, "top_categories": [], "recent_reviews": []
+        }
+
+    def get_statistics(self) -> dict[str, Any]:
+        return {"total_issues": 0, "categories": {}, "trend": []}
+
+    def compare_sessions(self, session_id_1: str, session_id_2: str) -> dict[str, Any]:
+        return {}
+
+    def search_all(self, query: str, limit: int = 20) -> dict[str, list[dict[str, Any]]]:
+        return {"documents": [], "sessions": [], "issues": []}
+
+    def save_autofix_action(self, session_id: str, suggestion_id: str, issue_id: str, rule_id: str, action_type: str, original_text: str, patched_text: str, line_start: int, line_end: int, patched_document: str = "") -> str:
+        return ""
+
+    def get_applied_suggestions(self, session_id: str) -> list[dict[str, Any]]:
+        return []
+
+    def revert_autofix_action(self, action_id: str, reverted_document: str = "") -> bool:
+        return False
+
+    def get_autofix_history(self, session_id: str) -> list[dict[str, Any]]:
+        return []

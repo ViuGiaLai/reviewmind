@@ -13,7 +13,7 @@ alembic>=1.13,<2.0
 sqlalchemy>=2.0,<3.0
 
 # PostgreSQL (optional - install when using REVIEWMIND_PG_DSN)
-# psycopg2-binary>=2.9,<3.0
+psycopg2-binary>=2.9,<3.0
 
 # S3 storage (optional - install when using REVIEWMIND_STORAGE_BACKEND=s3)
-# boto3>=1.34,<2.0
+boto3>=1.34,<2.0

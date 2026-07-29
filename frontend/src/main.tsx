@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  ClerkProvider, SignInButton, SignUpButton, UserButton, useUser, useClerk
+  ClerkProvider, SignInButton, SignUpButton, UserButton, useUser, useClerk, useAuth
 } from "@clerk/clerk-react";
 import { dark } from "@clerk/themes";
 import {
@@ -9,7 +9,7 @@ import {
   Search, Download, Upload, Plus, X, Save, RefreshCw, FilePen, Wrench, Eye, Zap,
   CheckCircle, CircleX, AlertTriangle, Lightbulb, BarChart3, Target,
   Star, ThumbsUp, BookOpen, Bell, User, ChevronRight, Home, Database, Users, Sparkles, Shield, Briefcase, LogIn, LogOut, Trash2, AlertCircle,
-  Clock, Activity, Sliders, Check, ArrowRight, ArrowLeft, Mail, Lock
+  Clock, Activity, Sliders, Check, ArrowRight, ArrowLeft, Mail, Lock, Loader2
 } from "lucide-react";
 import { QualityInsights } from "./components/QualityInsights";
 import { IssueInspector } from "./components/IssueInspector";
@@ -142,6 +142,7 @@ function App() {
   const [showProfileForm, setShowProfileForm] = useState(false);
   const [showPackForm, setShowPackForm] = useState(false);
   const [docViewMode, setDocViewMode] = useState<"raw" | "formatted">("raw");
+  const [isUploadingDocument, setIsUploadingDocument] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -150,6 +151,14 @@ function App() {
 
   const { user, isLoaded, isSignedIn } = useUser();
   const { signOut } = useClerk();
+  const { getToken } = useAuth();
+
+  const apiFetch = async (url: string, options: RequestInit = {}) => {
+    const token = await getToken();
+    const headers = new Headers(options.headers || {});
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return fetch(url, { ...options, headers });
+  };
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -252,13 +261,13 @@ function App() {
         if (enabledCats.length > 0) {
           formData.append("enabled_categories", JSON.stringify(enabledCats));
         }
-        response = await fetch(`${API_URL}/api/reviews/upload`, {
+        response = await apiFetch(`${API_URL}/api/reviews/upload`, {
           method: "POST",
           body: formData,
         });
       } else {
         // Text → use JSON review API
-        response = await fetch(`${API_URL}/api/reviews`, {
+        response = await apiFetch(`${API_URL}/api/reviews`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -350,7 +359,7 @@ function App() {
 
   async function loadReviews() {
     try {
-      const response = await fetch(`${API_URL}/api/reviews`);
+      const response = await apiFetch(`${API_URL}/api/reviews`);
       if (response.ok) {
         const data = await response.json();
         const list = (data.reviews || data || []).map((item: any) => ({
@@ -369,7 +378,7 @@ function App() {
 
   async function loadDocuments() {
     try {
-      const response = await fetch(`${API_URL}/api/documents`);
+      const response = await apiFetch(`${API_URL}/api/documents`);
       if (response.ok) {
         const data = await response.json();
         const list = (data.items || data || []).map((item: any) => ({
@@ -386,7 +395,7 @@ function App() {
     const found = reviewList.find(r => r.id === id);
     if (!found) return;
     try {
-      const response = await fetch(`${API_URL}/api/reviews/${id}`);
+      const response = await apiFetch(`${API_URL}/api/reviews/${id}`);
       if (response.ok) {
         const data = await response.json();
         const session: SessionDetail = {
@@ -451,12 +460,11 @@ function App() {
 
 
   async function handleDocumentUpload(file: File) {
+    setIsUploadingDocument(true);
     try {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("profile_id", profile);
-      formData.append("pack_ids", "[]");
-      const response = await fetch(`${API_URL}/api/reviews/upload`, {
+      const response = await apiFetch(`${API_URL}/api/reviews/upload`, {
         method: "POST",
         body: formData,
       });
@@ -473,6 +481,8 @@ function App() {
       }
     } catch {
       setDocuments(prev => [...prev, { id: crypto.randomUUID(), name: file.name, uploaded_at: new Date().toISOString() }]);
+    } finally {
+      setIsUploadingDocument(false);
     }
   }
 
@@ -480,7 +490,7 @@ function App() {
 
   async function handleDeleteDocument(id: string) {
     try {
-      await fetch(`${API_URL}/api/documents/${id}`, { method: "DELETE" });
+      await apiFetch(`${API_URL}/api/documents/${id}`, { method: "DELETE" });
     } catch { }
     setDocuments(prev => prev.filter(d => d.id !== id));
   }
@@ -680,7 +690,7 @@ function App() {
             ) : page === "history" ? (
               <HistoryView items={reviewList} onSelect={handleSelectReview} />
             ) : page === "documents" ? (
-              <DocumentsView documents={documents} onUpload={handleDocumentUpload} onDelete={handleDeleteDocument} uploadInputRef={uploadInputRef} />
+              <DocumentsView documents={documents} onUpload={handleDocumentUpload} onDelete={handleDeleteDocument} uploadInputRef={uploadInputRef} isUploading={isUploadingDocument} />
             ) : page === "profiles" ? (
               <ProfilesView showForm={showProfileForm} setShowForm={setShowProfileForm} />
             ) : page === "kbpacks" ? (
@@ -1551,11 +1561,12 @@ function HistoryView({ items, onSelect }: { items: HistoryItem[]; onSelect: (id:
 }
 
 /* Documents */
-function DocumentsView({ documents, onUpload, onDelete, uploadInputRef }: {
+function DocumentsView({ documents, onUpload, onDelete, uploadInputRef, isUploading }: {
   documents: DocumentItem[];
   onUpload: (file: File) => void;
   onDelete: (id: string) => void;
   uploadInputRef: React.RefObject<HTMLInputElement | null>;
+  isUploading?: boolean;
 }) {
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1570,7 +1581,10 @@ function DocumentsView({ documents, onUpload, onDelete, uploadInputRef }: {
           <h2>Documents</h2>
           <p className="page-subtitle">Uploaded documents available for review.</p>
         </div>
-        <button className="btn-primary" onClick={() => uploadInputRef.current?.click()}><Upload size={16} /> Upload Document</button>
+        <button className="btn-primary" onClick={() => uploadInputRef.current?.click()} disabled={isUploading}>
+          {isUploading ? <Loader2 size={16} className="spin" /> : <Upload size={16} />} 
+          {isUploading ? "Uploading..." : "Upload Document"}
+        </button>
         <input ref={uploadInputRef} type="file" accept=".txt,.md,.docx,.pdf" style={{ display: "none" }} onChange={handleUpload} />
       </div>
       {documents.length === 0 ? (

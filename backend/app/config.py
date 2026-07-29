@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 # Load .env from project root (two levels up from this file)
 _env_path = Path(__file__).resolve().parents[2] / ".env"
 if _env_path.exists():
-    load_dotenv(dotenv_path=_env_path)
+    load_dotenv(dotenv_path=_env_path, override=True)
 
 
 
@@ -38,14 +38,9 @@ class DatabaseSettings:
 
 @dataclass
 class StorageSettings:
-    """File storage configuration."""
-
-    backend: Literal["local", "s3"] = os.getenv("REVIEWMIND_STORAGE_BACKEND", "local")  # type: ignore
-
-    # Local storage
-    local_path: Path = Path(
-        os.getenv("REVIEWMIND_STORAGE_PATH", str(Path(__file__).resolve().parent.parent / "data" / "uploads"))
-    )
+    """File storage configuration (Cloudflare R2 / S3 only)."""
+    
+    backend: Literal["s3"] = "s3"
 
     # S3-compatible storage
     s3_endpoint: str = os.getenv("REVIEWMIND_S3_ENDPOINT", "")
@@ -57,11 +52,7 @@ class StorageSettings:
 
     @property
     def is_s3(self) -> bool:
-        return self.backend == "s3"
-
-    @property
-    def is_local(self) -> bool:
-        return self.backend == "local"
+        return True
 
 
 @dataclass
