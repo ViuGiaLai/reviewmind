@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { HistoryItem, SessionDetail } from "../main";
 import { TrendingUp, FolderOpen, Calendar, ArrowUp, ArrowDown, Clock } from "lucide-react";
 
@@ -18,6 +19,7 @@ export function ReviewTimeline({ items, onSelectSession }: {
   items: HistoryItem[];
   onSelectSession: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -57,8 +59,8 @@ export function ReviewTimeline({ items, onSelectSession }: {
     return `${mins}min`;
   }
 
-  if (timeline.length === 0) return <div className="chart-empty">No review history available</div>;
-  if (timeline.length < 2) return <div className="chart-empty">Run at least 2 reviews to see a timeline</div>;
+  if (timeline.length === 0) return <div className="chart-empty">{t("timeline.no_history")}</div>;
+  if (timeline.length < 2) return <div className="chart-empty">{t("timeline.run_at_least_2")}</div>;
 
   const firstScore = timeline[0].session.score;
   const lastScore = timeline[timeline.length - 1].session.score;
@@ -66,23 +68,23 @@ export function ReviewTimeline({ items, onSelectSession }: {
 
   return (
     <div className="card review-timeline">
-      <h3 className="chart-title"><TrendingUp size={16} /> Review Timeline</h3>
+      <h3 className="chart-title"><TrendingUp size={16} /> {t("timeline.title")}</h3>
 
       {/* Summary */}
       <div className="tl-summary">
         <div className="tl-stat">
           <span className="tl-stat-value">{timeline.length}</span>
-          <span className="tl-stat-label">Reviews</span>
+          <span className="tl-stat-label">{t("timeline.reviews")}</span>
         </div>
         <div className="tl-stat">
           <span className="tl-stat-value" style={{ color: totalChange >= 0 ? "var(--success)" : "var(--danger)" }}>
             {totalChange >= 0 ? `+${totalChange}` : totalChange}
           </span>
-          <span className="tl-stat-label">Total Change</span>
+          <span className="tl-stat-label">{t("timeline.total_change")}</span>
         </div>
         <div className="tl-stat">
           <span className="tl-stat-value">{firstScore} → {lastScore}</span>
-          <span className="tl-stat-label">Score Progression</span>
+          <span className="tl-stat-label">{t("timeline.progression")}</span>
         </div>
       </div>
 
@@ -117,7 +119,7 @@ export function ReviewTimeline({ items, onSelectSession }: {
                 </div>
                 <div className="tl-details">
                   <span className="tl-score" style={{ color: entry.session.score >= 80 ? "var(--success)" : entry.session.score >= 50 ? "var(--warning)" : "var(--danger)" }}>
-                    Score: {entry.session.score}
+                    {t("timeline.score")}: {entry.session.score}
                   </span>
                   <span className="tl-profile"><FolderOpen size={14} /> {entry.session.profile_id}</span>
                   <span className="tl-date"><Calendar size={14} /> {fmtDate(entry.session.created_at)}</span>
@@ -127,11 +129,11 @@ export function ReviewTimeline({ items, onSelectSession }: {
                 <div className="tl-changes">
                   {entry.scoreChange !== null && (
                     <span className={`tl-change ${isImprovement ? "positive" : "negative"}`}>
-                      {isImprovement ? <ArrowUp size={14} /> : <ArrowDown size={14} />} Score {isImprovement ? "+" : ""}{entry.scoreChange}
+                      {isImprovement ? <ArrowUp size={14} /> : <ArrowDown size={14} />} {t("timeline.score_change")} {isImprovement ? "+" : ""}{entry.scoreChange}
                     </span>
                   )}
                   {entry.timeSinceLast && (
-                    <span className="tl-time"><Clock size={14} /> {entry.timeSinceLast} after previous</span>
+                    <span className="tl-time"><Clock size={14} /> {entry.timeSinceLast} {t("timeline.after_previous")}</span>
                   )}
                 </div>
 

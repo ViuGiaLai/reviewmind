@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Issue, SessionDetail } from "../main";
 import { DiffViewer } from "./DiffViewer";
 import { FileText, Settings, Bot, Zap, ScrollText, MapPin, Ruler, Check, Slash, X, CheckCircle, CircleX, ChevronLeft, ChevronRight } from "lucide-react";
@@ -16,6 +17,7 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
   onNavigate?: (index: number) => void;
   apiFetch: (url: string, options?: RequestInit) => Promise<Response>;
 }) {
+  const { t } = useTranslation();
   const [activeSection, setActiveSection] = useState<"evidence" | "rule" | "ai" | "autofix" | "history">("evidence");
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -31,11 +33,11 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
   const currentIdx = issueIndex ?? 0;
 
   const evidenceTabs = [
-    { id: "evidence" as const, label: "Evidence", Icon: FileText },
-    { id: "rule" as const, label: "Rule", Icon: Settings },
-    { id: "ai" as const, label: "AI Explain", Icon: Bot },
-    { id: "autofix" as const, label: "Auto Fix", Icon: Zap },
-    { id: "history" as const, label: "History", Icon: ScrollText },
+    { id: "evidence" as const, label: t("inspector.evidence"), Icon: FileText },
+    { id: "rule" as const, label: t("inspector.rule"), Icon: Settings },
+    { id: "ai" as const, label: t("inspector.ai_explain"), Icon: Bot },
+    { id: "autofix" as const, label: t("inspector.autofix"), Icon: Zap },
+    { id: "history" as const, label: t("inspector.history"), Icon: ScrollText },
   ];
 
   async function loadAiExplanation() {
@@ -137,9 +139,9 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
             </div>
           </div>
           <div className="inspector-header-actions">
-            {onJumpToDoc && <button className="btn-sm outline" onClick={() => onJumpToDoc(issue.id)}><FileText size={14} /> Jump</button>}
-            {issue.status !== "resolved" && onUpdateStatus && <button className="btn-sm success" onClick={() => onUpdateStatus(issue.id, "resolved")}><Check size={14} /> Resolve</button>}
-            {issue.status !== "ignored" && onUpdateStatus && <button className="btn-sm secondary" onClick={() => onUpdateStatus(issue.id, "ignored")}><Slash size={14} /> Ignore</button>}
+            {onJumpToDoc && <button className="btn-sm outline" onClick={() => onJumpToDoc(issue.id)}><FileText size={14} /> {t("inspector.jump")}</button>}
+            {issue.status !== "resolved" && onUpdateStatus && <button className="btn-sm success" onClick={() => onUpdateStatus(issue.id, "resolved")}><Check size={14} /> {t("inspector.resolve")}</button>}
+            {issue.status !== "ignored" && onUpdateStatus && <button className="btn-sm secondary" onClick={() => onUpdateStatus(issue.id, "ignored")}><Slash size={14} /> {t("inspector.ignore")}</button>}
             <button className="modal-close" onClick={onClose}><X size={16} /></button>
           </div>
         </div>
@@ -165,7 +167,7 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
           {/* Evidence */}
           {activeSection === "evidence" && (
             <div className="inspector-section">
-              <h4><FileText size={14} /> Evidence</h4>
+              <h4><FileText size={14} /> {t("inspector.evidence")}</h4>
               {issue.evidence_excerpt && (
                 <div className="evidence-block">
                   <blockquote className="inspector-quote">"{issue.evidence_excerpt}"</blockquote>
@@ -190,19 +192,19 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
           {/* Rule */}
           {activeSection === "rule" && (
             <div className="inspector-section">
-              <h4><Settings size={14} /> Rule Information</h4>
+              <h4><Settings size={14} /> {t("inspector.rule")}</h4>
               <table className="inspector-table">
                 <tbody>
-                  <tr><td>Rule ID</td><td><code>{issue.rule_id}</code></td></tr>
-                  <tr><td>Category</td><td>{issue.category}</td></tr>
-                  <tr><td>Severity</td><td><span className={`sev-badge ${issue.severity}`}>{issue.severity}</span></td></tr>
-                  <tr><td>Confidence</td><td>{issue.confidence}%</td></tr>
-                  <tr><td>Source</td><td>{issue.source}</td></tr>
-                  <tr><td>Auto-fix</td><td>{issue.autofix_allowed === 1 ? <><CheckCircle size={14} /> Available</> : <><CircleX size={14} /> Not available</>}</td></tr>
+                  <tr><td>{t("inspector.rule_id")}</td><td><code>{issue.rule_id}</code></td></tr>
+                  <tr><td>{t("inspector.category")}</td><td>{issue.category}</td></tr>
+                  <tr><td>{t("inspector.severity")}</td><td><span className={`sev-badge ${issue.severity}`}>{issue.severity}</span></td></tr>
+                  <tr><td>{t("inspector.confidence")}</td><td>{issue.confidence}%</td></tr>
+                  <tr><td>{t("inspector.source")}</td><td>{issue.source}</td></tr>
+                  <tr><td>{t("inspector.autofix")}</td><td>{issue.autofix_allowed === 1 ? <><CheckCircle size={14} /> {t("inspector.available")}</> : <><CircleX size={14} /> {t("inspector.not_available")}</>}</td></tr>
                 </tbody>
               </table>
               <div className="inspector-rec">
-                <strong>Recommendation:</strong>
+                <strong>{t("inspector.recommendation")}:</strong>
                 <p>{issue.recommendation}</p>
               </div>
             </div>
@@ -211,13 +213,13 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
           {/* AI Explanation */}
           {activeSection === "ai" && (
             <div className="inspector-section">
-              <h4><Bot size={14} /> AI Explanation</h4>
+              <h4><Bot size={14} /> {t("inspector.ai_explain")}</h4>
               {aiLoading ? (
                 <div className="ai-message thinking">{[0,1,2].map(i => <div key={i} className="ai-thinking-dot" />)}</div>
               ) : aiExplanation ? (
                 <div className="inspector-ai-text">{aiExplanation.split("\n").map((l, i) => <p key={i}>{l}</p>)}</div>
               ) : (
-                <button className="btn-sm primary" onClick={loadAiExplanation}>Generate AI Explanation</button>
+                <button className="btn-sm primary" onClick={loadAiExplanation}>{t("inspector.generate_ai")}</button>
               )}
             </div>
           )}
@@ -225,7 +227,7 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
           {/* Auto Fix */}
           {activeSection === "autofix" && (
             <div className="inspector-section">
-              <h4><Zap size={14} /> Auto Fix</h4>
+              <h4><Zap size={14} /> {t("inspector.autofix")}</h4>
               {fixLoading ? (
                 <div className="loading-center"><span className="spinner" /></div>
               ) : autoFixSuggestion ? (
@@ -233,15 +235,15 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
                   <DiffViewer original={autoFixSuggestion.original} suggested={autoFixSuggestion.suggested} />
                   <div className="inspector-fix-actions" style={{ marginTop: 8 }}>
                     {!fixApplied ? (
-                      <button className="btn-sm success" onClick={handleApplyFix}><Check size={14} /> Apply Fix</button>
+                      <button className="btn-sm success" onClick={handleApplyFix}><Check size={14} /> {t("inspector.apply_fix")}</button>
                     ) : (
-                      <span className="status-badge resolved"><CheckCircle size={12} /> Applied</span>
+                      <span className="status-badge resolved"><CheckCircle size={12} /> {t("inspector.applied")}</span>
                     )}
-                    <button className="btn-sm outline" onClick={() => setAutoFixSuggestion(null)}>Regenerate</button>
+                    <button className="btn-sm outline" onClick={() => setAutoFixSuggestion(null)}>{t("inspector.regenerate")}</button>
                   </div>
                 </div>
               ) : (
-                <button className="btn-sm primary" onClick={loadAutoFix}>Generate Fix</button>
+                <button className="btn-sm primary" onClick={loadAutoFix}>{t("inspector.generate_fix")}</button>
               )}
             </div>
           )}
@@ -249,7 +251,7 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
           {/* History */}
           {activeSection === "history" && (
             <div className="inspector-section">
-              <h4><ScrollText size={14} /> Issue History</h4>
+              <h4><ScrollText size={14} /> {t("inspector.scan_history")}</h4>
               {scanHistory.length > 0 ? (
                 <div className="inspector-scan-list">
                   {scanHistory.map((h, i) => (
@@ -260,7 +262,7 @@ export function IssueInspector({ issue, session, onClose, onUpdateStatus, onJump
                   ))}
                 </div>
               ) : (
-                <div className="chart-empty">No scan history available for this issue.</div>
+                <div className="chart-empty">{t("inspector.no_history")}</div>
               )}
               <div className="inspector-scan-summary">
                 <strong>Session: </strong>{session.filename}

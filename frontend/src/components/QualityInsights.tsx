@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Issue, SessionDetail } from "../main";
 import { Lightbulb, Star, ThumbsUp, Wrench, CircleX, ClipboardList, Target, AlertTriangle, Zap } from "lucide-react";
 
@@ -6,6 +7,7 @@ import { Lightbulb, Star, ThumbsUp, Wrench, CircleX, ClipboardList, Target, Aler
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 export function QualityInsights({ session }: { session: SessionDetail }) {
+  const { t } = useTranslation();
   const catScores = Object.entries(session.category_scores || {});
   if (catScores.length === 0) return null;
 
@@ -30,7 +32,7 @@ export function QualityInsights({ session }: { session: SessionDetail }) {
 
   return (
     <div className="card quality-insights">
-      <h3 className="chart-title"><Lightbulb size={16} /> Quality Insights</h3>
+      <h3 className="chart-title"><Lightbulb size={16} /> {t("insights.title")}</h3>
 
       <div className="qi-grid">
         {/* Overall Assessment */}
@@ -42,44 +44,44 @@ export function QualityInsights({ session }: { session: SessionDetail }) {
             <span className="qi-score-total">/100</span>
           </div>
           <div className="qi-assessment">
-            {avgScore >= 85 ? <><Star size={14} /> Excellent quality!</> : avgScore >= 70 ? <><ThumbsUp size={14} /> Good, room for improvement</> : avgScore >= 50 ? <><Wrench size={14} /> Needs significant work</> : <><CircleX size={14} /> Major issues to address</>}
+            {avgScore >= 85 ? <><Star size={14} /> {t("insights.excellent")}</> : avgScore >= 70 ? <><ThumbsUp size={14} /> {t("insights.good")}</> : avgScore >= 50 ? <><Wrench size={14} /> {t("insights.needs_work")}</> : <><CircleX size={14} /> {t("insights.major_issues")}</>}
           </div>
         </div>
 
         {/* Weakest Area */}
         <div className="qi-card qi-weak">
-          <div className="qi-label">Weakest Area</div>
+          <div className="qi-label">{t("insights.weakest_area")}</div>
           <div className="qi-value">{weakest[0]}</div>
           <div className="qi-sub">
-            Score: <strong style={{ color: "var(--danger)" }}>{weakest[1]}</strong>
-            <span className="qi-impact"> — Fixing this could +{Math.round((95 - weakest[1]) / 5)} pts</span>
+            {t("insights.score")}: <strong style={{ color: "var(--danger)" }}>{weakest[1]}</strong>
+            <span className="qi-impact"> — {t("insights.fixing_this_could")} +{Math.round((95 - weakest[1]) / 5)} {t("insights.pts")}</span>
           </div>
         </div>
 
         {/* Strongest Area */}
         <div className="qi-card qi-strong">
-          <div className="qi-label">Strongest Area</div>
+          <div className="qi-label">{t("insights.strongest_area")}</div>
           <div className="qi-value">{strongest[0]}</div>
           <div className="qi-sub">
-            Score: <strong style={{ color: "var(--success)" }}>{strongest[1]}</strong>
+            {t("insights.score")}: <strong style={{ color: "var(--success)" }}>{strongest[1]}</strong>
           </div>
         </div>
 
         {/* ETA to 95+ */}
         <div className="qi-card qi-eta">
-          <div className="qi-label">Estimated to reach <strong>95+</strong></div>
+          <div className="qi-label">{t("insights.estimated_to_reach")} <strong>95+</strong></div>
           <div className="qi-value qi-eta-value">
             <span className="qi-eta-number">{estimatedMinutes}</span>
-            <span className="qi-eta-unit">minutes</span>
+            <span className="qi-eta-unit">{t("insights.minutes")}</span>
           </div>
           <div className="qi-sub">
-            ~{estimatedIssuesToFix} key issues to fix (gap: {gap} pts)
+            ~{estimatedIssuesToFix} {t("insights.key_issues_to_fix", { gap: gap.toString() })}
           </div>
         </div>
       </div>
 
       {/* Recommended Fix Order */}
-      <h4 className="qi-fix-title"><ClipboardList size={16} /> Recommended Fix Order</h4>
+      <h4 className="qi-fix-title"><ClipboardList size={16} /> {t("insights.recommended_fix_order")}</h4>
       <div className="qi-fix-list">
         {fixOrder.map((item, idx) => (
           <div key={item.category} className={`qi-fix-item ${item.priority}`}>
@@ -103,12 +105,12 @@ export function QualityInsights({ session }: { session: SessionDetail }) {
       {/* Tips */}
       <div className="qi-tips">
         {weakest[1] < 60 && (
-          <div className="qi-tip"><Target size={14} /> Focus on <strong>{weakest[0]}</strong> first — it has the highest improvement potential.</div>
+          <div className="qi-tip"><Target size={14} /> {t("insights.focus_on")} <strong>{weakest[0]}</strong> {t("insights.first_highest_potential")}</div>
         )}
         {session.issues.filter(i => i.severity === "high").length > 0 && (
-          <div className="qi-tip"><AlertTriangle size={14} /> Fix {session.issues.filter(i => i.severity === "high").length} HIGH severity issues immediately.</div>
+          <div className="qi-tip"><AlertTriangle size={14} /> {t("insights.fix")} {session.issues.filter(i => i.severity === "high").length} {t("insights.high_severity_immediate")}</div>
         )}
-        <div className="qi-tip"><Zap size={14} /> Your strongest area is <strong>{strongest[0]}</strong> ({strongest[1]} pts). Maintain this quality.</div>
+        <div className="qi-tip"><Zap size={14} /> {t("insights.strongest_area_is")} <strong>{strongest[0]}</strong> ({strongest[1]} {t("insights.pts")}). {t("insights.maintain_quality")}</div>
       </div>
     </div>
   );

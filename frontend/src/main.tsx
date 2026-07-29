@@ -1261,24 +1261,24 @@ function ReviewWizardView({
       {/* ── STEP 1: Upload Document (Item 1, 2) ─────────────────────────────── */}
       {step === 1 && (
         <div className="wizard-card card">
-          <h3><Upload size={20} /> Step 1: Select Document</h3>
-          <p className="wizard-sub">Choose how you want to provide the document for review.</p>
+          <h3><Upload size={20} /> {t("wizard.s1_title")}</h3>
+          <p className="wizard-sub">{t("wizard.s1_desc")}</p>
 
           {/* ── Option Cards: Upload New or Select Existing ── */}
           {!selectedDocumentId && !binaryFile && !text && (
             <div className="wizard-source-options">
               <div className="card source-option-card" onClick={() => wizardUploadRef.current?.click()}>
                 <Upload size={36} className="soc-icon" />
-                <strong>Upload New File</strong>
-                <p>Upload a DOCX, PDF, or Markdown file. It will be stored and a review can be run later.</p>
-                <span className="soc-action">Choose File ➔</span>
+                <strong>{t("wizard.upload_new")}</strong>
+                <p>{t("wizard.upload_new_desc")}</p>
+                <span className="soc-action">{t("wizard.choose_file")}</span>
                 <input ref={wizardUploadRef} type="file" accept=".docx,.pdf,.txt,.md,.markdown,.html,.tex" style={{ display: "none" }} onChange={handleFileSelect} />
               </div>
               {documents.length > 0 && (
                 <div className="card source-option-card">
                   <FolderOpen size={36} className="soc-icon" />
-                  <strong>Select Existing Document</strong>
-                  <p>Pick a document from your previously uploaded document vault.</p>
+                  <strong>{t("wizard.select_existing")}</strong>
+                  <p>{t("wizard.select_existing_desc")}</p>
                   <div className="existing-docs-list">
                     {documents.map(doc => (
                       <div key={doc.id} className={`existing-doc-item ${selectedDocumentId === doc.id ? "selected" : ""}`} onClick={() => handleSelectDocument(doc.id)}>
@@ -1306,7 +1306,7 @@ function ReviewWizardView({
                       <div className="ufc-tags">
                         <span className="format-tag">{binaryFile.name.split('.').pop()?.toUpperCase()}</span>
                         <span className="size-tag">{(binaryFile.size / 1024).toFixed(1)} KB</span>
-                        <span className="status-tag ready"><CheckCircle size={12} /> Uploaded & Ready</span>
+                        <span className="status-tag ready"><CheckCircle size={12} /> {t("wizard.uploaded_ready")}</span>
                       </div>
                     </>
                   ) : (
@@ -1328,7 +1328,7 @@ function ReviewWizardView({
               </div>
               <div className="ufc-actions">
                 <button className="btn-danger-outline" onClick={handleClearSelection}>
-                  <Trash2 size={14} /> Clear
+                  <Trash2 size={14} /> {t("wizard.clear")}
                 </button>
               </div>
             </div>
@@ -1338,7 +1338,7 @@ function ReviewWizardView({
           {isUploadingDoc && (
             <div className="wizard-upload-progress">
               <Loader2 size={20} className="spin" />
-              <span>Uploading document...</span>
+              <span>{t("wizard.uploading")}</span>
             </div>
           )}
 
@@ -1353,7 +1353,7 @@ function ReviewWizardView({
 
           <div className="wizard-nav-actions">
             <button className="btn-primary" disabled={!selectedDocumentId && !binaryFile && !text} onClick={() => setStep(2)}>
-              Next: Select Profile <ArrowRight size={16} />
+              {t("wizard.next_profile")}
             </button>
           </div>
         </div>
@@ -1362,16 +1362,16 @@ function ReviewWizardView({
       {/* ── STEP 2: Profile Selection & Auto Detect (Item 1, 13) ─────────────── */}
       {step === 2 && (
         <div className="wizard-card card">
-          <h3><Target size={20} /> Step 2: Select Review Profile</h3>
-          <p className="wizard-sub">Profile defines scoring weights, required sections, and writing permission constraints.</p>
+          <h3><Target size={20} /> {t("wizard.s2_title")}</h3>
+          <p className="wizard-sub">{t("wizard.s2_desc")}</p>
 
           {/* Auto-Detect Banner */}
           <div className="auto-detect-banner">
             <div className="adb-left">
               <Sparkles size={20} className="adb-icon" />
               <div>
-                <strong>System Auto-Detected Profile: {detectedProfileInfo.name}</strong>
-                <p>Based on document keywords, layout structure, and headings ({detectedProfileInfo.confidence}% confidence match).</p>
+                <strong>{t("wizard.auto_detected")} {detectedProfileInfo.name}</strong>
+                <p>Based on document keywords, layout structure, and headings ({t("wizard.confidence")} {detectedProfileInfo.confidence}%).</p>
               </div>
             </div>
             <button className="btn-primary" style={{ padding: "8px 16px", fontSize: ".82rem" }} onClick={() => setProfile(detectedProfileInfo.id)}>
@@ -1406,7 +1406,7 @@ function ReviewWizardView({
 
           <div className="wizard-nav-actions">
             <button className="btn-secondary" onClick={() => setStep(1)}><ArrowLeft size={16} /> Back</button>
-            <button className="btn-primary" onClick={() => setStep(3)}>Next: Knowledge Packs <ArrowRight size={16} /></button>
+            <button className="btn-primary" onClick={() => setStep(3)}>{t("wizard.next_pack")}</button>
           </div>
         </div>
       )}
@@ -1414,8 +1414,8 @@ function ReviewWizardView({
       {/* ── STEP 3: Knowledge Pack Selection (Item 1, 3, 13) ────────────────── */}
       {step === 3 && (
         <div className="wizard-card card">
-          <h3><BookOpen size={20} /> Step 3: Select Knowledge Packs</h3>
-          <p className="wizard-sub">Knowledge Packs extend the base engine with domain-specific rules (Citations, Compliance, Standards).</p>
+          <h3><BookOpen size={20} /> {t("wizard.s3_title")}</h3>
+          <p className="wizard-sub">{t("wizard.s3_desc")}</p>
 
           <div className="packs-select-grid">
             {packsList.map(pk => {
@@ -1440,7 +1440,7 @@ function ReviewWizardView({
 
           <div className="wizard-nav-actions">
             <button className="btn-secondary" onClick={() => setStep(2)}><ArrowLeft size={16} /> Back</button>
-            <button className="btn-primary" onClick={() => setStep(4)}>Next: Configuration <ArrowRight size={16} /></button>
+            <button className="btn-primary" onClick={() => setStep(4)}>{t("wizard.next_config")}</button>
           </div>
         </div>
       )}
@@ -1448,12 +1448,12 @@ function ReviewWizardView({
       {/* ── STEP 4: Review Configuration & Categories (Item 4, 13) ──────────── */}
       {step === 4 && (
         <div className="wizard-card card">
-          <h3><Sliders size={20} /> Step 4: Review Configuration</h3>
-          <p className="wizard-sub">Fine-tune review categories, AI assistance level, and language preferences.</p>
+          <h3><Sliders size={20} /> {t("wizard.s4_title")}</h3>
+          <p className="wizard-sub">{t("wizard.s4_desc")}</p>
 
           {/* Categories Toggles */}
           <div className="wizard-section">
-            <h4>Review Categories ({selectedCategories.length}/7 Selected)</h4>
+            <h4>{t("wizard.rule_categories")} ({selectedCategories.length}/7 Selected)</h4>
             <div className="categories-grid">
               {categoriesList.map(cat => {
                 const checked = selectedCategories.includes(cat.id);
@@ -1472,26 +1472,26 @@ function ReviewWizardView({
 
           {/* Review Mode Radio */}
           <div className="wizard-section" style={{ marginTop: 20 }}>
-            <h4>Review Execution Mode</h4>
+            <h4>{t("wizard.review_mode")}</h4>
             <div className="modes-grid">
               <label className={`mode-card ${reviewMode === "rule_only" ? "selected" : ""}`}>
                 <input type="radio" name="mode" checked={reviewMode === "rule_only"} onChange={() => setReviewMode("rule_only")} />
                 <div>
-                  <strong>⚡ Rule-First Only (Fastest)</strong>
+                  <strong>⚡ {t("wizard.mode_fast")}</strong>
                   <p>Runs 200+ rule engine checks locally. 0ms LLM latency, 100% deterministic.</p>
                 </div>
               </label>
               <label className={`mode-card ${reviewMode === "rule_ai" ? "selected" : ""}`}>
                 <input type="radio" name="mode" checked={reviewMode === "rule_ai"} onChange={() => setReviewMode("rule_ai")} />
                 <div>
-                  <strong>🤖 Rule + AI Assisted (Recommended)</strong>
+                  <strong>🤖 {t("wizard.mode_ai")}</strong>
                   <p>AI Scheduler evaluates whether AI is needed after rules finish. Optional AI analysis.</p>
                 </div>
               </label>
               <label className={`mode-card ${reviewMode === "full" ? "selected" : ""}`}>
                 <input type="radio" name="mode" checked={reviewMode === "full"} onChange={() => setReviewMode("full")} />
                 <div>
-                  <strong>🛠️ Full Review & Auto-Fix Plan</strong>
+                  <strong>🛠️ {t("wizard.mode_full")}</strong>
                   <p>Runs full rule engine, AI reviewer, and generates automated 1-click fix suggestions.</p>
                 </div>
               </label>
@@ -1509,7 +1509,7 @@ function ReviewWizardView({
 
           <div className="wizard-nav-actions">
             <button className="btn-secondary" onClick={() => setStep(3)}><ArrowLeft size={16} /> Back</button>
-            <button className="btn-primary" onClick={() => setStep(5)}>Next: Summary <ArrowRight size={16} /></button>
+            <button className="btn-primary" onClick={() => setStep(5)}>{t("wizard.next_summary")}</button>
           </div>
         </div>
       )}
@@ -1517,24 +1517,24 @@ function ReviewWizardView({
       {/* ── STEP 5: Review Summary & Execution (Item 5) ─────────────────────── */}
       {step === 5 && (
         <div className="wizard-card card">
-          <h3><CheckCircle size={20} /> Step 5: Review Summary</h3>
-          <p className="wizard-sub">Verify your document review settings before launching the engine pipeline.</p>
+          <h3><CheckCircle size={20} /> {t("wizard.s5_title")}</h3>
+          <p className="wizard-sub">{t("wizard.s5_desc")}</p>
 
           <div className="summary-confirm-box">
             <div className="sc-row">
-              <span>Document File:</span>
+              <span>{t("wizard.document")}:</span>
               <strong>{binaryFile ? binaryFile.name : "Markdown Text Document"}</strong>
             </div>
             <div className="sc-row">
-              <span>Selected Profile:</span>
+              <span>{t("wizard.profile_selected")}:</span>
               <strong style={{ textTransform: "capitalize" }}>{profile} Profile</strong>
             </div>
             <div className="sc-row">
-              <span>Knowledge Packs:</span>
+              <span>{t("wizard.packs_loaded")}:</span>
               <strong>{selectedPacks.join(", ")}</strong>
             </div>
             <div className="sc-row">
-              <span>Enabled Categories:</span>
+              <span>{t("wizard.categories_active")}:</span>
               <strong>{selectedCategories.length} Categories Enabled</strong>
             </div>
             <div className="sc-row">

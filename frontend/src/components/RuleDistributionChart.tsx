@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Issue } from "../main";
 import { BarChart3, Search, Target } from "lucide-react";
 
@@ -6,6 +7,7 @@ import { BarChart3, Search, Target } from "lucide-react";
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 export function RuleDistributionChart({ issues }: { issues: Issue[] }) {
+  const { t } = useTranslation();
   // Count by rule_id
   const ruleCounts: Record<string, { count: number; category: string; severity: string }> = {};
   issues.forEach(issue => {
@@ -22,11 +24,11 @@ export function RuleDistributionChart({ issues }: { issues: Issue[] }) {
   const maxCount = Math.max(...items.map(i => i.count), 1);
   const colors = ["var(--danger)", "var(--warning)", "var(--primary)", "var(--info)", "var(--success)", "#8b5cf6", "#ec4899"];
 
-  if (items.length === 0) return <div className="chart-empty">No rule data</div>;
+  if (items.length === 0) return <div className="chart-empty">{t("rules_dist.no_rule_data")}</div>;
 
   return (
     <div className="card rule-dist-chart">
-      <h3 className="chart-title"><BarChart3 size={16} /> Rule Distribution</h3>
+      <h3 className="chart-title"><BarChart3 size={16} /> {t("rules_dist.title")}</h3>
 
       {/* Horizontal bar chart */}
       <div className="rdc-list">
@@ -54,9 +56,9 @@ export function RuleDistributionChart({ issues }: { issues: Issue[] }) {
 
       {/* Summary */}
       <div className="rdc-summary">
-        <span><Search size={14} /> {items.length} unique rules triggered</span>
-        <span><BarChart3 size={14} /> {issues.length} total issues</span>
-        <span><Target size={14} /> Most active: <strong>{items[0]?.rule}</strong> ({items[0]?.count}x)</span>
+        <span><Search size={14} /> {items.length} {t("rules_dist.unique_rules_triggered")}</span>
+        <span><BarChart3 size={14} /> {issues.length} {t("rules_dist.total_issues")}</span>
+        <span><Target size={14} /> {t("rules_dist.most_active")} <strong>{items[0]?.rule}</strong> ({items[0]?.count}x)</span>
       </div>
     </div>
   );
