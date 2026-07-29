@@ -1,0 +1,53 @@
+id: apa
+name: APA 7th Edition
+version: "1.0.0"
+description: APA 7th Edition citation and formatting guidelines for social sciences
+profile: academic
+author: ReviewMind
+website: "https://apastyle.apa.org/"
+categories:
+  - citation
+  - format
+required_packs:
+  - academic-base
+incompatible_packs:
+  - ieee
+  - acm
+  - nature
+  - springer
+  - elsevier
+config:
+  citation_style: apa
+  heading_font: bold
+  heading_alignment: center
+  reference_format: hanging_indent
+  line_spacing: 2.0
+permissions:
+  - category: citation
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+  - category: format
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: true
+capabilities:
+  - id: apa-citation
+    name: APA 7 In-text Citations
+    description: Validate APA 7 (Author, Year) and narrative citations
+    category: citation
+    severity: high
+  - id: apa-references
+    name: APA 7 Reference List
+    description: Verify hanging indent, reference formatting
+    category: citation
+    severity: high
+  - id: apa-headings
+    name: APA 7 Headings
+    description: Check heading levels follow APA 5-level system
+    category: format
+    severity: medium

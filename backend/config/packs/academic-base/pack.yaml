@@ -1,0 +1,90 @@
+id: academic-base
+name: Academic Base
+version: "1.0.0"
+description: Core academic writing standards for thesis, dissertation, and journal papers
+profile: academic
+author: ReviewMind
+categories:
+  - structure
+  - writing
+  - citation
+  - format
+  - figure_table
+  - logic
+rules: []
+required_packs: []
+incompatible_packs: []
+config:
+  min_abstract_words: 100
+  max_abstract_words: 350
+  min_section_words: 30
+  max_words: 2000
+  max_passive: 5
+  max_hedging: 3
+  max_weak: 5
+  max_repeats: 3
+  max_grammar_issues: 10
+  max_spelling_issues: 15
+permissions:
+  - category: structure
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+  - category: writing
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+  - category: citation
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+  - category: format
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+  - category: figure_table
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+  - category: logic
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+capabilities:
+  - id: academic-grammar
+    name: Grammar & Spelling
+    description: Check grammar, spelling, and punctuation
+    category: writing
+    severity: medium
+  - id: academic-structure
+    name: Document Structure
+    description: Verify IMRaD structure, section ordering, completeness
+    category: structure
+    severity: high
+  - id: academic-citations
+    name: Citation Basics
+    description: Check citation-reference matching, basic formatting
+    category: citation
+    severity: high
+  - id: academic-format
+    name: Formatting Basics
+    description: Check heading hierarchy, section length consistency
+    category: format
+    severity: medium
+  - id: academic-figures
+    name: Figure & Table Basics
+    description: Check figure/table numbering, captions, cross-references
+    category: figure_table
+    severity: medium

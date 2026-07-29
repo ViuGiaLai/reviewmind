@@ -1,0 +1,32 @@
+id: elsevier
+name: Elsevier
+version: "1.0.0"
+description: Elsevier citation style for journals published by Elsevier
+profile: academic
+author: ReviewMind
+website: "https://www.elsevier.com/authors"
+categories:
+  - citation
+required_packs:
+  - academic-base
+incompatible_packs:
+  - apa
+  - ieee
+  - acm
+  - nature
+  - springer
+config:
+  citation_style: elsevier
+permissions:
+  - category: citation
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+capabilities:
+  - id: elsevier-citation
+    name: Elsevier Numbered Citations
+    description: Validate [1], [1,2], [1-3] citations per Elsevier style
+    category: citation
+    severity: medium

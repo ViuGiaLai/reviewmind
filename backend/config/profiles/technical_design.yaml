@@ -1,0 +1,6 @@
+id: technical_design
+name: Technical Design Document
+categories: [structure, writing, format]
+weights: {structure: 50, writing: 30, format: 20}
+permissions: {structure: 3, writing: 2, format: 2}
+required_sections: [Overview, Architecture, Components, Configuration]

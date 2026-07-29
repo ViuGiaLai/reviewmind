@@ -1,0 +1,42 @@
+id: fda
+name: FDA 21 CFR Part 11
+version: "1.0.0"
+description: FDA electronic records and signatures compliance for regulated industries
+profile: sop
+author: ReviewMind
+website: "https://www.fda.gov/regulatory-information"
+categories:
+  - compliance
+required_packs: []
+incompatible_packs: []
+config:
+  pack_id: fda
+permissions:
+  - category: compliance
+    detect: true
+    explain: true
+    suggest: false
+    rewrite: false
+    autofix: false
+  - category: structure
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+capabilities:
+  - id: fda-part11
+    name: 21 CFR Part 11 Compliance
+    description: Check for audit trail, e-signatures, user identification
+    category: compliance
+    severity: high
+  - id: fda-gxp
+    name: GxP Validation
+    description: Verify GMP/GLP/GCP validation documentation
+    category: compliance
+    severity: high
+  - id: fda-data-integrity
+    name: Data Integrity
+    description: Check for data integrity and ALCOA+ principles
+    category: compliance
+    severity: high

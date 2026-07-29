@@ -1,0 +1,56 @@
+id: sop
+name: Standard Operating Procedure
+version: "1.0.0"
+description: SOP documentation standards and compliance requirements
+profile: sop
+author: ReviewMind
+categories:
+  - compliance
+  - structure
+  - writing
+required_packs: []
+incompatible_packs: []
+config:
+  pack_id: sop
+  min_section_words: 20
+  max_passive: 3
+permissions:
+  - category: structure
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+  - category: writing
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+  - category: compliance
+    detect: true
+    explain: true
+    suggest: false
+    rewrite: false
+    autofix: false
+capabilities:
+  - id: sop-safety
+    name: Safety Warnings
+    description: Verify safety warnings, PPE, and hazard communication
+    category: compliance
+    severity: high
+  - id: sop-signatures
+    name: Approval & Signatures
+    description: Check for approval signatures, dates, and authorization
+    category: compliance
+    severity: high
+  - id: sop-procedure
+    name: Procedure Format
+    description: Verify numbered steps, imperative language, clear actions
+    category: structure
+    severity: high
+  - id: sop-revision
+    name: Revision Control
+    description: Check version numbering and revision history
+    category: compliance
+    severity: medium

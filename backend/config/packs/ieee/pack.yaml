@@ -1,4 +1,38 @@
 id: ieee
-name: IEEE starter pack
+name: IEEE
+version: "1.0.0"
+description: IEEE citation style for engineering, computer science, and technical publications
 profile: academic
-description: Starter metadata for IEEE-specific citation and reference rules.
+author: ReviewMind
+website: "https://ieeeauthorcenter.ieee.org/"
+categories:
+  - citation
+required_packs:
+  - academic-base
+incompatible_packs:
+  - apa
+  - acm
+  - nature
+  - springer
+  - elsevier
+config:
+  citation_style: ieee
+  citation_separator: ","
+permissions:
+  - category: citation
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+capabilities:
+  - id: ieee-citation
+    name: IEEE Bracketed Citations
+    description: Verify sequential [1], [2] numbering per IEEE standards
+    category: citation
+    severity: high
+  - id: ieee-references
+    name: IEEE Reference Format
+    description: Check IEEE reference entry structure
+    category: citation
+    severity: medium

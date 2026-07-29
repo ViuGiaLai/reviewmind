@@ -1,0 +1,37 @@
+id: acm
+name: ACM
+version: "1.0.0"
+description: ACM citation style for computer science and information technology publications
+profile: academic
+author: ReviewMind
+website: "https://www.acm.org/publications/authors/reference-formatting"
+categories:
+  - citation
+required_packs:
+  - academic-base
+incompatible_packs:
+  - apa
+  - ieee
+  - nature
+  - springer
+  - elsevier
+config:
+  citation_style: acm
+permissions:
+  - category: citation
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+capabilities:
+  - id: acm-citation
+    name: ACM Citation Format
+    description: Validate bracketed ACM citations
+    category: citation
+    severity: high
+  - id: acm-references
+    name: ACM Reference Format
+    description: Check ACM initials-first reference formatting
+    category: citation
+    severity: medium

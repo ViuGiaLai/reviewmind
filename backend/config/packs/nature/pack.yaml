@@ -1,0 +1,32 @@
+id: nature
+name: Nature
+version: "1.0.0"
+description: Nature Publishing Group citation style for scientific journals
+profile: academic
+author: ReviewMind
+website: "https://www.nature.com/nature/for-authors"
+categories:
+  - citation
+required_packs:
+  - academic-base
+incompatible_packs:
+  - apa
+  - ieee
+  - acm
+  - springer
+  - elsevier
+config:
+  citation_style: nature
+permissions:
+  - category: citation
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+capabilities:
+  - id: nature-citation
+    name: Nature Superscript Citations
+    description: Verify superscript numbered citations per Nature guidelines
+    category: citation
+    severity: high

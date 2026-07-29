@@ -1,0 +1,55 @@
+id: business
+name: Business Report & Proposal
+version: "1.0.0"
+description: Business report, executive summary, and proposal writing standards
+profile: business
+author: ReviewMind
+categories:
+  - structure
+  - writing
+  - format
+required_packs: []
+incompatible_packs: []
+config:
+  max_passive: 8
+  max_hedging: 2
+  max_weak: 3
+  min_abstract_words: 50
+  max_abstract_words: 500
+  min_section_words: 20
+  variance_ratio: 15
+permissions:
+  - category: structure
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: true
+    autofix: true
+  - category: writing
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: true
+    autofix: true
+  - category: format
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: true
+    autofix: true
+capabilities:
+  - id: business-exec-summary
+    name: Executive Summary
+    description: Check for executive summary presence and quality
+    category: structure
+    severity: high
+  - id: business-persuasiveness
+    name: Persuasive Language
+    description: Verify active, persuasive language suitable for proposals
+    category: writing
+    severity: medium
+  - id: business-structure
+    name: Business Structure
+    description: Verify introduction, solution, budget, timeline sections
+    category: structure
+    severity: high

@@ -1,0 +1,32 @@
+id: springer
+name: Springer
+version: "1.0.0"
+description: Springer-Verlag citation style for scientific and technical publications
+profile: academic
+author: ReviewMind
+website: "https://www.springer.com/gp/authors-editors"
+categories:
+  - citation
+required_packs:
+  - academic-base
+incompatible_packs:
+  - apa
+  - ieee
+  - acm
+  - nature
+  - elsevier
+config:
+  citation_style: springer
+permissions:
+  - category: citation
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+capabilities:
+  - id: springer-citation
+    name: Springer Author-Year
+    description: Validate (Author, Year) citations per Springer style
+    category: citation
+    severity: medium

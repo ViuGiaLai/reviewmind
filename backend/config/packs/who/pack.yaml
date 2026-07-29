@@ -1,0 +1,32 @@
+id: who
+name: WHO Guidelines
+version: "1.0.0"
+description: World Health Organization documentation structure and compliance guidelines
+profile: sop
+author: ReviewMind
+website: "https://www.who.int/publications"
+categories:
+  - compliance
+required_packs: []
+incompatible_packs: []
+config:
+  pack_id: who
+permissions:
+  - category: compliance
+    detect: true
+    explain: true
+    suggest: false
+    rewrite: false
+    autofix: false
+  - category: structure
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+capabilities:
+  - id: who-structure
+    name: WHO Document Structure
+    description: Verify Objective, Scope, Responsibility, Procedure structure
+    category: compliance
+    severity: high

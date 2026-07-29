@@ -1,0 +1,42 @@
+id: iso9001
+name: ISO 9001:2015
+version: "1.0.0"
+description: Quality Management System documentation compliance per ISO 9001:2015
+profile: sop
+author: ReviewMind
+website: "https://www.iso.org/standard/62085.html"
+categories:
+  - compliance
+required_packs: []
+incompatible_packs: []
+config:
+  pack_id: iso9001
+permissions:
+  - category: compliance
+    detect: true
+    explain: true
+    suggest: false
+    rewrite: false
+    autofix: false
+  - category: structure
+    detect: true
+    explain: true
+    suggest: true
+    rewrite: false
+    autofix: false
+capabilities:
+  - id: iso9001-quality-policy
+    name: Quality Policy Requirement
+    description: Check for documented quality policy per ISO 9001 clause 5.2
+    category: compliance
+    severity: high
+  - id: iso9001-doc-control
+    name: Document Control
+    description: Verify document control procedures per ISO 9001 clause 7.5
+    category: compliance
+    severity: high
+  - id: iso9001-objectives
+    name: Quality Objectives
+    description: Check for measurable quality objectives per ISO 9001 clause 6.2
+    category: compliance
+    severity: high
